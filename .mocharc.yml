@@ -1,0 +1,4 @@
+require: 'src/test/setup.js'
+spec: 'out/test/**/*.test.js'
+ignore: 'out/test/integration/**'
+timeout: 10000

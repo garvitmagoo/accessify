@@ -1,0 +1,20 @@
+.vscode/**
+.vscode-test/**
+src/**
+scripts/**
+Test Folder/**
+node_modules/**
+.mocharc.yml
+.mocharc.yaml
+.gitignore
+tsconfig.json
+esbuild.js
+TestAllRules.tsx
+TestComponent.js
+TestComponent.js.map
+TestComponent.tsx
+icon.svg
+*.vsix
+*.zip
+out/**
+!out/extension.js

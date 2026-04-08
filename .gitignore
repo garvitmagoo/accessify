@@ -1,0 +1,30 @@
+# Build outputs
+out/
+*.vsix
+.vscode-test/
+
+# Dependencies
+node_modules/
+package-lock.json
+
+# IDE & OS
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Environment & secrets
+.env
+.env.local
+.env.*.local
+
+# Test coverage
+coverage/
+.nyc_output/
+
+# Misc
+dist/
+build/

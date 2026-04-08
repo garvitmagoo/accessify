@@ -1,0 +1,86 @@
+{
+  "tool": "A11y Scanner",
+  "version": "0.1.0",
+  "scannedAt": "2026-03-14T11:12:24.111Z",
+  "summary": {
+    "totalIssues": 7,
+    "filesScanned": 1,
+    "filesWithIssues": 1,
+    "byRule": {
+      "color-contrast": 1,
+      "aria-pattern": 2,
+      "img-alt": 1,
+      "button-label": 1,
+      "click-events-have-key-events": 1,
+      "form-label": 1
+    },
+    "bySeverity": {
+      "warning": 3,
+      "error": 4
+    }
+  },
+  "files": [
+    {
+      "path": "TestComponent.tsx",
+      "issueCount": 7,
+      "issues": [
+        {
+          "rule": "color-contrast",
+          "severity": "warning",
+          "message": "Insufficient color contrast — ratio 3.95:1 (foreground: \"gray\", background: \"white\"). WCAG AA requires ≥ 4.5:1 for normal text.",
+          "line": 5,
+          "column": 7,
+          "wcag": "1.4.3"
+        },
+        {
+          "rule": "aria-pattern",
+          "severity": "error",
+          "message": "`role=\"tablist\"` must contain children with `role=\"tab\"`.",
+          "line": 9,
+          "column": 7,
+          "wcag": "4.1.2"
+        },
+        {
+          "rule": "aria-pattern",
+          "severity": "error",
+          "message": "`role=\"dialog\"` must have `aria-labelledby` or `aria-label`.",
+          "line": 14,
+          "column": 7,
+          "wcag": "4.1.2"
+        },
+        {
+          "rule": "img-alt",
+          "severity": "error",
+          "message": "Image element must have an `alt` attribute for screen readers.",
+          "line": 24,
+          "column": 7,
+          "wcag": "1.1.1"
+        },
+        {
+          "rule": "button-label",
+          "severity": "error",
+          "message": "Self-closing button/IconButton must have `aria-label`, `aria-labelledby`, or `title` for screen readers.",
+          "line": 25,
+          "column": 7,
+          "wcag": "4.1.2"
+        },
+        {
+          "rule": "click-events-have-key-events",
+          "severity": "warning",
+          "message": "Non-interactive element <div> with `onClick` must have keyboard support. Add `role`, `tabIndex={0}`, `onKeyDown`.",
+          "line": 26,
+          "column": 7,
+          "wcag": "2.1.1"
+        },
+        {
+          "rule": "form-label",
+          "severity": "warning",
+          "message": "Form control <input> should have a label. Add `aria-label`, `aria-labelledby`, or a `label` prop.",
+          "line": 27,
+          "column": 7,
+          "wcag": "1.3.1"
+        }
+      ]
+    }
+  ]
+}

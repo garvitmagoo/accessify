@@ -1,0 +1,200 @@
+{
+  "name": "accessify",
+  "displayName": "Accessify",
+  "description": "AI-powered accessibility scanner for React/JSX/TSX projects. Detects WCAG violations, previews screen reader output, generates a11y tests, and provides intelligent fix suggestions.",
+  "version": "1.0.0",
+  "publisher": "garvit-magoo",
+  "license": "MIT",
+  "icon": "icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/garvit-magoo/a11y-scanner-extension"
+  },
+  "bugs": {
+    "url": "https://github.com/garvit-magoo/a11y-scanner-extension/issues"
+  },
+  "homepage": "https://github.com/garvit-magoo/a11y-scanner-extension#readme",
+  "keywords": [
+    "accessibility",
+    "a11y",
+    "wcag",
+    "react",
+    "jsx",
+    "tsx",
+    "screen-reader",
+    "aria",
+    "linter"
+  ],
+  "galleryBanner": {
+    "color": "#0078D4",
+    "theme": "dark"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Linters",
+    "Testing",
+    "Other"
+  ],
+  "activationEvents": [
+    "onLanguage:typescriptreact",
+    "onLanguage:javascriptreact"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "a11y.showReport",
+        "title": "Accessify: Show Accessibility Report"
+      },
+      {
+        "command": "a11y.screenReaderPreview",
+        "title": "Accessify: Screen Reader Preview"
+      },
+      {
+        "command": "a11y.setApiKey",
+        "title": "Accessify: Set AI API Key"
+      },
+      {
+        "command": "a11y.generateTests",
+        "title": "Accessify: Generate Accessibility Tests"
+      },
+      {
+        "command": "a11y.reviewPR",
+        "title": "Accessify: Review PR / Compare Changes"
+      },
+      {
+        "command": "a11y.exportSarif",
+        "title": "Accessify: Export SARIF Report"
+      },
+      {
+        "command": "a11y.exportJson",
+        "title": "Accessify: Export JSON Report"
+      },
+      {
+        "command": "a11y.fixFile",
+        "title": "Accessify: AI Fix Entire File"
+      },
+      {
+        "command": "a11y.bulkFixFile",
+        "title": "Accessify: Static Fix Current File"
+      },
+      {
+        "command": "a11y.bulkFixWorkspace",
+        "title": "Accessify: Static Fix Workspace"
+      },
+      {
+        "command": "a11y.bulkAiFix",
+        "title": "Accessify: Bulk AI Fix Workspace"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "a11y.showReport",
+        "key": "ctrl+alt+r",
+        "mac": "cmd+alt+r"
+      },
+      {
+        "command": "a11y.bulkFixFile",
+        "key": "ctrl+alt+f",
+        "mac": "cmd+alt+f",
+        "when": "editorTextFocus"
+      }
+    ],
+    "configuration": {
+      "title": "Accessify",
+      "properties": {
+        "a11y.aiProvider": {
+          "type": "string",
+          "enum": [
+            "azure-openai",
+            "openai",
+            "claude",
+            "none"
+          ],
+          "enumDescriptions": [
+            "Azure OpenAI Service (requires endpoint configuration)",
+            "OpenAI API (GPT-4, GPT-4o, etc.)",
+            "Anthropic Claude API (Claude Sonnet, Opus, etc.)",
+            "Disable AI features"
+          ],
+          "default": "none",
+          "description": "AI provider for generating fix suggestions. Set to 'none' to disable AI features."
+        },
+        "a11y.aiApiKey": {
+          "type": "string",
+          "default": "",
+          "description": "API key for the selected AI provider. DEPRECATED: Use the 'A11y: Set AI API Key' command instead for secure storage.",
+          "deprecationMessage": "Use the 'A11y: Set AI API Key' command to store your key securely."
+        },
+        "a11y.aiEndpoint": {
+          "type": "string",
+          "default": "",
+          "description": "Azure OpenAI endpoint URL (required for azure-openai provider)."
+        },
+        "a11y.aiModel": {
+          "type": "string",
+          "default": "gpt-4",
+          "description": "Model/deployment name to use for AI suggestions."
+        },
+        "a11y.aiBatchConcurrency": {
+          "type": "integer",
+          "default": 10,
+          "minimum": 1,
+          "maximum": 10,
+          "description": "Number of files to process in parallel during bulk AI fix. Higher values are faster but use more API quota."
+        },
+        "a11y.scanOnSave": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically scan files for accessibility issues on save."
+        },
+        "a11y.scanOnOpen": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically scan files when opened."
+        },
+        "a11y.severity": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warning",
+            "information",
+            "hint"
+          ],
+          "default": "warning",
+          "description": "Default diagnostic severity for accessibility issues."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run package",
+    "compile": "npm run check-types && node esbuild.js",
+    "check-types": "tsc --noEmit",
+    "watch": "node esbuild.js --watch",
+    "lint": "eslint src --ext ts",
+    "test": "tsc -p ./ && mocha",
+    "test:integration": "tsc -p ./ && node out/test/runIntegration.js",
+    "package": "npm run check-types && node esbuild.js --production"
+  },
+  "devDependencies": {
+    "@types/glob": "^8.1.0",
+    "@types/mocha": "^10.0.6",
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.85.0",
+    "@typescript-eslint/eslint-plugin": "^7.0.0",
+    "@typescript-eslint/parser": "^7.0.0",
+    "@vscode/test-electron": "^2.3.8",
+    "@vscode/vsce": "^2.22.0",
+    "esbuild": "^0.27.5",
+    "eslint": "^8.56.0",
+    "glob": "^10.3.10",
+    "mocha": "^10.3.0",
+    "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "axe-core": "^4.11.2"
+  }
+}
