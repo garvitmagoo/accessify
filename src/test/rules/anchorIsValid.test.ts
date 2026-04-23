@@ -45,4 +45,17 @@ describe('anchor-is-valid rule', () => {
     const issues = collectIssues('<a href="#" />', checkAnchorIsValid);
     assert.strictEqual(issues.length, 1);
   });
+
+  /* ── Spread props ──────────────────────────────────────────────────── */
+
+  it('suppresses missing href when spread props present', () => {
+    const issues = collectIssues('<a {...linkProps}>Click</a>', checkAnchorIsValid);
+    assert.strictEqual(issues.length, 0);
+  });
+
+  it('still flags invalid href even with spread props', () => {
+    const issues = collectIssues('<a href="#" {...props}>Click</a>', checkAnchorIsValid);
+    assert.strictEqual(issues.length, 1);
+    assert.ok(issues[0].message.includes('href="#"'));
+  });
 });

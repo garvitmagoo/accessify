@@ -50,4 +50,45 @@ describe('button-label rule', () => {
     const issues = collectIssues('<div>hello</div>', checkButtonLabel);
     assert.strictEqual(issues.length, 0);
   });
+
+  /* ── Spread props ──────────────────────────────────────────────────── */
+
+  it('suppresses self-closing button with spread props', () => {
+    const issues = collectIssues('<button {...props} />', checkButtonLabel);
+    assert.strictEqual(issues.length, 0);
+  });
+
+  it('suppresses opening button with spread props', () => {
+    const issues = collectIssues('<button {...props}><img src="icon.png" /></button>', checkButtonLabel);
+    assert.strictEqual(issues.length, 0);
+  });
+
+  /* ── Empty labels ──────────────────────────────────────────────────── */
+
+  it('flags empty aria-label=""', () => {
+    const issues = collectIssues('<button aria-label="" />', checkButtonLabel);
+    assert.strictEqual(issues.length, 1);
+    assert.strictEqual(issues[0].severity, 'error');
+    assert.ok(issues[0].message.includes('empty'));
+  });
+
+  it('flags empty title=""', () => {
+    const issues = collectIssues('<button title="" />', checkButtonLabel);
+    assert.strictEqual(issues.length, 1);
+    assert.ok(issues[0].message.includes('empty'));
+  });
+
+  /* ── aria-hidden buttons ────────────────────────────────────────────── */
+
+  it('skips aria-hidden="true" buttons', () => {
+    const issues = collectIssues('<button aria-hidden="true" />', checkButtonLabel);
+    assert.strictEqual(issues.length, 0);
+  });
+
+  /* ── sr-only child text ─────────────────────────────────────────────── */
+
+  it('passes button with sr-only child containing text', () => {
+    const issues = collectIssues('<button><span>Submit</span></button>', checkButtonLabel);
+    assert.strictEqual(issues.length, 0);
+  });
 });

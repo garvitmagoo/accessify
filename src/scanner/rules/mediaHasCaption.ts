@@ -1,10 +1,13 @@
 import * as ts from 'typescript';
 import type { A11yIssue } from '../../types';
+import { hasSpreadProps } from './jsxHelpers';
 
 /**
  * Rule: media-has-caption
  * WCAG 1.2.2 / 1.2.3 — `<video>` elements must have captions for deaf/hard-of-hearing users.
  * Checks for `<track kind="captions">` children or muted attribute (muted video doesn't need captions).
+ *
+ * Spread props: Suppressed — muted / captions config may be provided dynamically.
  */
 export function checkMediaHasCaption(node: ts.Node, sourceFile: ts.SourceFile): A11yIssue[] {
   const issues: A11yIssue[] = [];
@@ -15,6 +18,9 @@ export function checkMediaHasCaption(node: ts.Node, sourceFile: ts.SourceFile): 
 
   const tagName = node.tagName.getText(sourceFile).toLowerCase();
   if (tagName !== 'video' && tagName !== 'audio') { return issues; }
+
+  // Spread props may carry muted or other config dynamically
+  if (hasSpreadProps(node)) { return issues; }
 
   const attrs = node.attributes.properties;
 

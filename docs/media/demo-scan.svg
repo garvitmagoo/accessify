@@ -1,0 +1,82 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 260" width="720" height="260" role="img" aria-label="Accessify flags an img element that is missing an alt attribute with a red squiggle and a diagnostic bubble">
+  <defs>
+    <style>
+      .bg { fill: #1e1e1e; }
+      .gutter { fill: #252526; }
+      .line-no { fill: #858585; font-family: Menlo, Consolas, monospace; font-size: 13px; }
+      .code { font-family: Menlo, Consolas, monospace; font-size: 14px; }
+      .tag { fill: #569cd6; }
+      .attr { fill: #9cdcfe; }
+      .str { fill: #ce9178; }
+      .punct { fill: #d4d4d4; }
+      .comment { fill: #6a9955; }
+      .bubble { fill: #2d2d30; stroke: #454545; }
+      .bubble-title { fill: #f14c4c; font-weight: 700; font-size: 12px; font-family: -apple-system, Segoe UI, sans-serif; }
+      .bubble-body { fill: #cccccc; font-size: 12px; font-family: -apple-system, Segoe UI, sans-serif; }
+      .rule-badge { fill: #3c3c3c; }
+      .rule-text { fill: #9cdcfe; font-size: 11px; font-family: Menlo, Consolas, monospace; font-weight: 600; }
+      .cursor { fill: #aeafad; }
+      @keyframes blink { 0%, 49% { opacity: 1; } 50%, 100% { opacity: 0; } }
+      @keyframes squiggle-appear { 0%, 20% { opacity: 0; stroke-dashoffset: 180; } 40%, 100% { opacity: 1; stroke-dashoffset: 0; } }
+      @keyframes bubble-appear { 0%, 50% { opacity: 0; transform: translateY(6px); } 70%, 100% { opacity: 1; transform: translateY(0); } }
+      @keyframes type-in { 0%, 5% { width: 0; } 40%, 100% { width: 100%; } }
+      .cursor-b { animation: blink 1s infinite steps(1); }
+      .squiggle { stroke: #f14c4c; stroke-width: 1.5; fill: none; stroke-dasharray: 180; animation: squiggle-appear 3s infinite; }
+      .diag-bubble { animation: bubble-appear 3s infinite; transform-origin: 380px 160px; }
+    </style>
+    <pattern id="sq" width="6" height="4" patternUnits="userSpaceOnUse">
+      <path d="M 0 2 Q 1.5 0 3 2 T 6 2" fill="none" stroke="#f14c4c" stroke-width="1.2"/>
+    </pattern>
+  </defs>
+
+  <!-- Editor chrome -->
+  <rect class="bg" width="720" height="260" rx="8"/>
+  <rect class="gutter" x="0" y="0" width="48" height="260" rx="8"/>
+  <rect class="gutter" x="8" y="0" width="40" height="260"/>
+
+  <!-- Tab -->
+  <rect x="0" y="0" width="720" height="32" fill="#2d2d30" rx="8"/>
+  <rect x="0" y="24" width="720" height="8" fill="#2d2d30"/>
+  <rect x="12" y="0" width="160" height="32" fill="#1e1e1e"/>
+  <text x="28" y="21" class="code" fill="#cccccc">Header.tsx</text>
+  <circle cx="156" cy="16" r="3" fill="#cccccc" opacity="0.6"/>
+
+  <!-- Line numbers -->
+  <text x="28" y="68" class="line-no" text-anchor="end">8</text>
+  <text x="28" y="96" class="line-no" text-anchor="end">9</text>
+  <text x="28" y="124" class="line-no" text-anchor="end">10</text>
+
+  <!-- Code: <img src="logo.png" /> -->
+  <g class="code">
+    <text x="64" y="68">
+      <tspan class="punct">&lt;</tspan><tspan class="tag">img</tspan><tspan class="punct"> </tspan><tspan class="attr">src</tspan><tspan class="punct">=</tspan><tspan class="str">"logo.png"</tspan><tspan class="punct"> /&gt;</tspan>
+    </text>
+    <text x="64" y="96">
+      <tspan class="punct">&lt;</tspan><tspan class="tag">button</tspan><tspan class="punct"> </tspan><tspan class="attr">onClick</tspan><tspan class="punct">=</tspan><tspan class="punct">{</tspan><tspan class="attr">handleClick</tspan><tspan class="punct">}</tspan><tspan class="punct">&gt;</tspan>
+    </text>
+    <text x="84" y="120">
+      <tspan class="comment">{/* button content */}</tspan>
+    </text>
+    <text x="64" y="144">
+      <tspan class="punct">&lt;/</tspan><tspan class="tag">button</tspan><tspan class="punct">&gt;</tspan>
+    </text>
+  </g>
+
+  <!-- Red squiggle under <img ... /> (line 8) — animated -->
+  <path class="squiggle" d="M 64 72 Q 67 70 70 72 T 76 72 T 82 72 T 88 72 T 94 72 T 100 72 T 106 72 T 112 72 T 118 72 T 124 72 T 130 72 T 136 72 T 142 72 T 148 72 T 154 72 T 160 72 T 166 72 T 172 72 T 178 72 T 184 72 T 190 72 T 196 72 T 202 72 T 208 72"/>
+
+  <!-- Diagnostic bubble -->
+  <g class="diag-bubble">
+    <rect class="bubble" x="260" y="130" width="420" height="84" rx="6"/>
+    <!-- Pointer -->
+    <path d="M 288 130 L 294 122 L 300 130 Z" class="bubble" stroke-width="0"/>
+    <text x="276" y="152" class="bubble-title">● Error</text>
+    <rect class="rule-badge" x="330" y="138" width="76" height="18" rx="3"/>
+    <text x="368" y="151" class="rule-text" text-anchor="middle">img-alt</text>
+    <text x="276" y="178" class="bubble-body">Image element must have an `alt` attribute for screen readers.</text>
+    <text x="276" y="198" class="bubble-body" fill="#888">Accessify · WCAG 1.1.1</text>
+  </g>
+
+  <!-- Blinking cursor -->
+  <rect class="cursor cursor-b" x="212" y="56" width="2" height="16"/>
+</svg>

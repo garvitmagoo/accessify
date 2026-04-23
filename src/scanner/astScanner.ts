@@ -12,18 +12,18 @@ import { checkNextjsImageAlt } from './rules/nextjsImage';
 import { checkNextjsHeadLang } from './rules/nextjsHeadLang';
 import { checkNextjsLink } from './rules/nextjsLink';
 import { checkAutocompleteValid } from './rules/autocompleteValid';
-import { checkNoPositiveTabindex } from './rules/noPositiveTabindex';
-import { checkFocusVisible } from './rules/focusVisible';
-import { checkPageTitle } from './rules/pageTitle';
 import { checkNoMouseOnlyHover } from './rules/noMouseOnlyHover';
-import { checkAnchorIsValid } from './rules/anchorIsValid';
-import { checkNoRedundantRoles } from './rules/noRedundantRoles';
 import { checkNoAutofocus } from './rules/noAutofocus';
 import { checkInteractiveSupportsFocus } from './rules/interactiveSupportsFocus';
-import { checkMediaHasCaption } from './rules/mediaHasCaption';
-import { checkNoAccessKey } from './rules/noAccessKey';
-import { checkPreferSemanticElements } from './rules/preferSemanticElements';
 import { checkNoNonInteractiveHandlers } from './rules/noNonInteractiveHandlers';
+import { checkSvgAccessibleName } from './rules/svgAccessibleName';
+import { checkAnchorIsValid } from './rules/anchorIsValid';
+import { checkFocusVisible } from './rules/focusVisible';
+import { checkLabelHasAssociatedControl } from './rules/labelHasAssociatedControl';
+import { checkMediaHasCaption } from './rules/mediaHasCaption';
+import { checkPageTitle } from './rules/pageTitle';
+import { checkPreferSemanticElements } from './rules/preferSemanticElements';
+import { checkSkipLink } from './rules/skipLink';
 
 type RuleChecker = (node: ts.Node, sourceFile: ts.SourceFile) => A11yIssue[];
 
@@ -39,18 +39,18 @@ const PER_NODE_RULES: RuleChecker[] = [
   checkNextjsHeadLang,
   checkNextjsLink,
   checkAutocompleteValid,
-  checkNoPositiveTabindex,
-  checkFocusVisible,
-  checkPageTitle,
   checkNoMouseOnlyHover,
-  checkAnchorIsValid,
-  checkNoRedundantRoles,
   checkNoAutofocus,
   checkInteractiveSupportsFocus,
-  checkMediaHasCaption,
-  checkNoAccessKey,
-  checkPreferSemanticElements,
   checkNoNonInteractiveHandlers,
+  checkSvgAccessibleName,
+  checkAnchorIsValid,
+  checkFocusVisible,
+  checkLabelHasAssociatedControl,
+  checkMediaHasCaption,
+  checkPageTitle,
+  checkPreferSemanticElements,
+  checkSkipLink,
 ];
 
 /**
@@ -66,7 +66,7 @@ export function scanForA11yIssues(sourceCode: string, fileName: string): A11yIss
 }
 
 function scanForA11yIssuesUnsafe(sourceCode: string, fileName: string): A11yIssue[] {
-  const isTsx = fileName.endsWith('.tsx') || fileName.endsWith('.jsx');
+  const isTsx = fileName.endsWith('.tsx') || fileName.endsWith('.jsx') || fileName.endsWith('.html');
   const sourceFile = ts.createSourceFile(
     fileName,
     sourceCode,

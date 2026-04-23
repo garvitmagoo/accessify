@@ -1,10 +1,14 @@
 import * as ts from 'typescript';
 import type { A11yIssue } from '../../types';
+import { hasSpreadProps } from './jsxHelpers';
 
 /**
  * Rule: anchor-is-valid
  * WCAG 2.4.4 — Anchors must have a real destination. `href="#"`, `href="javascript:void(0)"`,
  * or missing `href` on an `<a>` are anti-patterns — use a `<button>` for actions instead.
+ *
+ * Spread props: When `{...props}` is present, `href` may be provided
+ * dynamically — suppresses "missing href" to avoid false positives.
  */
 const INVALID_HREFS = new Set(['#', '#!', 'javascript:void(0)', 'javascript:void(0);', 'javascript:;', 'javascript:']);
 
@@ -36,6 +40,9 @@ export function checkAnchorIsValid(node: ts.Node, sourceFile: ts.SourceFile): A1
   }
 
   if (!hrefFound) {
+    // Spread props may carry href dynamically — suppress to avoid false positives
+    if (hasSpreadProps(node)) { return issues; }
+
     const { line, character } = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile));
     issues.push({
       message: 'Anchor element is missing `href` attribute. If this is an action, use a `<button>` instead.',

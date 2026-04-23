@@ -61,4 +61,16 @@ describe('click-events-have-key-events rule', () => {
     assert.ok(issues[0].message.includes('role'));
     assert.ok(issues[0].message.includes('tabIndex'));
   });
+
+  /* ── Spread props ──────────────────────────────────────────────────── */
+
+  it('suppresses when spread props present', () => {
+    const issues = collectIssues('<div {...handlers} onClick={handleClick}>click</div>', checkClickKeyEvents);
+    assert.strictEqual(issues.length, 0);
+  });
+
+  it('suppresses self-closing with spread props', () => {
+    const issues = collectIssues('<span {...props} />', checkClickKeyEvents);
+    assert.strictEqual(issues.length, 0);
+  });
 });

@@ -1,13 +1,19 @@
 import * as ts from 'typescript';
 import type { A11yIssue } from '../../types';
+import { extractTailwindColors, suggestAccessibleTailwindClass } from './tailwindColors';
 
 /**
  * Rule: color-contrast
- * Detects inline JSX styles where foreground and background colors are both
- * specified and fails WCAG 2.1 AA contrast ratio (≥ 4.5 for normal text,
- * ≥ 3.0 for large text).
+ * Detects foreground and background color pairs that fail WCAG 2.1 AA
+ * contrast ratio (≥ 4.5 for normal text, ≥ 3.0 for large text).
  *
- * Supports:
+ * Color sources (checked in order of precedence):
+ *  1. Inline JSX styles — `style={{ color: "...", backgroundColor: "..." }}`
+ *  2. Class-based / Tailwind utilities — `className="text-white bg-red-500"`
+ *     Supports text-{color}-{shade}, bg-{color}-{shade}, arbitrary values
+ *     like text-[#hex] / bg-[rgb(...)], and the full Tailwind v3 palette.
+ *
+ * Supported color formats:
  *  - Named CSS colors (common set)
  *  - Hex (#RGB, #RRGGBB, #RRGGBBAA)
  *  - rgb() / rgba()
@@ -52,10 +58,15 @@ export function parseColor(value: string): RGB | null {
     return parseHex(v);
   }
 
-  // rgb(r, g, b) / rgba(r, g, b, a)
-  const rgbMatch = v.match(/^rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})/);
+  // rgb(r, g, b) / rgba(r, g, b, a) — blend against white if alpha < 1
+  const rgbMatch = v.match(/^rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})(?:\s*,\s*([\d.]+))?\s*\)/);
   if (rgbMatch) {
-    return { r: clamp(+rgbMatch[1]), g: clamp(+rgbMatch[2]), b: clamp(+rgbMatch[3]) };
+    const r = clamp(+rgbMatch[1]), g = clamp(+rgbMatch[2]), b = clamp(+rgbMatch[3]);
+    const a = rgbMatch[4] !== undefined ? Math.min(1, Math.max(0, parseFloat(rgbMatch[4]))) : 1;
+    if (a < 1) {
+      return { r: Math.round(a * r + (1 - a) * 255), g: Math.round(a * g + (1 - a) * 255), b: Math.round(a * b + (1 - a) * 255) };
+    }
+    return { r, g, b };
   }
 
   return null;
@@ -64,7 +75,15 @@ export function parseColor(value: string): RGB | null {
 function parseHex(hex: string): RGB | null {
   let h = hex.replace('#', '');
   if (h.length === 3) { h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2]; }
-  if (h.length === 8) { h = h.slice(0, 6); } // strip alpha
+  if (h.length === 8) {
+    // Blend against white background instead of discarding alpha
+    const a = parseInt(h.slice(6, 8), 16) / 255;
+    return {
+      r: Math.round(a * parseInt(h.slice(0, 2), 16) + (1 - a) * 255),
+      g: Math.round(a * parseInt(h.slice(2, 4), 16) + (1 - a) * 255),
+      b: Math.round(a * parseInt(h.slice(4, 6), 16) + (1 - a) * 255),
+    };
+  }
   if (h.length !== 6) { return null; }
   const n = parseInt(h, 16);
   if (isNaN(n)) { return null; }
@@ -185,6 +204,25 @@ export function suggestAccessibleForeground(fgColor: string, bgColor: string): s
 
 /* ── AST helpers ────────────────────────────────────────────────────────── */
 
+function isDisabled(
+  node: ts.JsxSelfClosingElement | ts.JsxOpeningElement,
+  sf: ts.SourceFile,
+): boolean {
+  for (const prop of node.attributes.properties) {
+    if (!ts.isJsxAttribute(prop)) { continue; }
+    const name = prop.name.getText(sf);
+    if (name === 'disabled') { return true; }
+    if (name === 'aria-disabled') {
+      if (!prop.initializer) { return true; }
+      if (ts.isStringLiteral(prop.initializer) && prop.initializer.text === 'true') { return true; }
+      if (ts.isJsxExpression(prop.initializer) && prop.initializer.expression) {
+        if (prop.initializer.expression.kind === ts.SyntaxKind.TrueKeyword) { return true; }
+      }
+    }
+  }
+  return false;
+}
+
 const FG_KEYS = new Set(['color']);
 const BG_KEYS = new Set(['backgroundColor', 'background']);
 
@@ -192,7 +230,7 @@ const BG_KEYS = new Set(['backgroundColor', 'background']);
  * Given a JSX `style={{ ... }}` expression, extract color strings for
  * foreground and background.
  */
-function extractColors(
+function extractInlineColors(
   node: ts.JsxSelfClosingElement | ts.JsxOpeningElement,
   sf: ts.SourceFile,
 ): { fg?: string; bg?: string; fgNode?: ts.Node; bgNode?: ts.Node } {
@@ -229,6 +267,62 @@ function extractColors(
   return {};
 }
 
+/**
+ * Extract the string value of a `className` or `class` JSX attribute.
+ */
+function getClassNameValue(
+  node: ts.JsxSelfClosingElement | ts.JsxOpeningElement,
+  sf: ts.SourceFile,
+): string | undefined {
+  for (const prop of node.attributes.properties) {
+    if (!ts.isJsxAttribute(prop)) { continue; }
+    const name = prop.name.getText(sf);
+    if (name !== 'className' && name !== 'class') { continue; }
+    if (!prop.initializer) { continue; }
+
+    // className="..."
+    if (ts.isStringLiteral(prop.initializer)) {
+      return prop.initializer.text;
+    }
+
+    // className={"..."}
+    if (ts.isJsxExpression(prop.initializer) && prop.initializer.expression) {
+      const expr = prop.initializer.expression;
+      if (ts.isStringLiteral(expr) || ts.isNoSubstitutionTemplateLiteral(expr)) {
+        return expr.text;
+      }
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Extract foreground and background colors from a JSX element.
+ * Checks inline styles first, then falls back to className-based
+ * Tailwind / utility-class parsing. Inline styles take precedence
+ * (matching browser specificity behaviour).
+ */
+function extractColors(
+  node: ts.JsxSelfClosingElement | ts.JsxOpeningElement,
+  sf: ts.SourceFile,
+): { fg?: string; bg?: string; source: 'inline' | 'class'; fgClass?: string; bgClass?: string } {
+  const inline = extractInlineColors(node, sf);
+  if (inline.fg && inline.bg) {
+    return { fg: inline.fg, bg: inline.bg, source: 'inline' };
+  }
+
+  // Try className / Tailwind utilities
+  const classList = getClassNameValue(node, sf);
+  const tw = classList ? extractTailwindColors(classList) : { fg: undefined, bg: undefined, fgClass: undefined, bgClass: undefined };
+
+  // Merge — inline styles override class-based colors
+  const fg = inline.fg ?? tw.fg;
+  const bg = inline.bg ?? tw.bg;
+  const source: 'inline' | 'class' = (!inline.fg && !inline.bg && (tw.fg || tw.bg)) ? 'class' : 'inline';
+
+  return { fg, bg, source, fgClass: tw.fgClass, bgClass: tw.bgClass };
+}
+
 /* ── Rule entry point ───────────────────────────────────────────────────── */
 
 export function checkColorContrast(node: ts.Node, sourceFile: ts.SourceFile): A11yIssue[] {
@@ -238,7 +332,12 @@ export function checkColorContrast(node: ts.Node, sourceFile: ts.SourceFile): A1
     return issues;
   }
 
-  const { fg, bg } = extractColors(node, sourceFile);
+  // Disabled elements are exempt from contrast requirements (WCAG 1.4.3)
+  if (isDisabled(node, sourceFile)) {
+    return issues;
+  }
+
+  const { fg, bg, source, fgClass, bgClass } = extractColors(node, sourceFile);
 
   // We can only check when both colors are statically resolvable
   if (!fg || !bg) { return issues; }
@@ -253,14 +352,36 @@ export function checkColorContrast(node: ts.Node, sourceFile: ts.SourceFile): A1
   // WCAG AA requires ≥ 4.5 for normal text
   if (ratio < 4.5) {
     const { line, character } = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile));
+    const via = source === 'class' ? ' (via class utilities)' : '';
+
+    // Build suggestion info
+    const data: Record<string, string> = { foreground: fg, background: bg, source };
+    let suggestion = '';
+
+    if (source === 'class' && fgClass) {
+      data.fgClass = fgClass;
+      if (bgClass) { data.bgClass = bgClass; }
+      const suggestedClass = suggestAccessibleTailwindClass(fgClass, bg, parseColor, contrastRatio);
+      if (suggestedClass) {
+        data.suggestedFgClass = suggestedClass;
+        suggestion = ` Suggested fix: replace "${fgClass}" with "${suggestedClass}".`;
+      }
+    } else if (source === 'inline') {
+      const fixedFg = suggestAccessibleForeground(fg, bg);
+      if (fixedFg) {
+        data.suggestedForeground = fixedFg;
+        suggestion = ` Suggested fix: change foreground to "${fixedFg}".`;
+      }
+    }
+
     issues.push({
-      message: `Insufficient color contrast — ratio ${ratioStr}:1 (foreground: "${fg}", background: "${bg}"). WCAG AA requires ≥ 4.5:1 for normal text.`,
+      message: `Insufficient color contrast — ratio ${ratioStr}:1 (foreground: "${fg}", background: "${bg}")${via}. WCAG AA requires ≥ 4.5:1 for normal text.${suggestion}`,
       rule: 'color-contrast',
       severity: ratio < 3 ? 'error' : 'warning',
       line,
       column: character,
       snippet: node.getText(sourceFile),
-      data: { foreground: fg, background: bg },
+      data,
     });
   }
 

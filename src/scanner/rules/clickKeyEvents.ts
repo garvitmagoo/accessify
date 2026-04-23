@@ -1,10 +1,14 @@
 import * as ts from 'typescript';
 import type { A11yIssue } from '../../types';
+import { hasSpreadProps } from './jsxHelpers';
 
 /**
  * Rule: click-events-have-key-events
  * Elements with onClick must also have onKeyDown/onKeyUp/onKeyPress for keyboard accessibility.
  * Only applies to non-interactive HTML elements (div, span, etc.).
+ *
+ * Spread props: When `{...props}` is present, we cannot know whether
+ * onClick/onKeyDown are provided dynamically — suppress to avoid noise.
  */
 const INTERACTIVE_ELEMENTS = new Set([
   'a', 'button', 'input', 'select', 'textarea', 'details', 'summary',
@@ -20,6 +24,9 @@ export function checkClickKeyEvents(node: ts.Node, sourceFile: ts.SourceFile): A
     if (INTERACTIVE_ELEMENTS.has(tagName) || /^[A-Z]/.test(node.tagName.getText(sourceFile))) {
       return issues;
     }
+
+    // Spread props may carry event handlers dynamically
+    if (hasSpreadProps(node)) { return issues; }
 
     const attrs = node.attributes.properties;
     const hasOnClick = attrs.some(attr =>

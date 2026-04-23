@@ -1,5 +1,6 @@
 import * as ts from 'typescript';
 import type { A11yIssue } from '../../types';
+import { hasSpreadProps, getAttrStringValue, hasAttr } from './jsxHelpers';
 
 /**
  * Rule: form-label
@@ -8,6 +9,10 @@ import type { A11yIssue } from '../../types';
  * placeholder (as a fallback indicator), MUI-specific props (InputLabelProps, inputProps,
  * slotProps, slots, componentsProps — all MUI v4/v5/v6 labeling patterns),
  * and wrapping FormControl parent (standard MUI label context pattern).
+ *
+ * Also handles:
+ *  - Spread props — suppresses when `{...props}` may carry labels.
+ *  - Empty `aria-label=""` — flagged explicitly as an error.
  */
 export function checkFormLabel(node: ts.Node, sourceFile: ts.SourceFile): A11yIssue[] {
   const issues: A11yIssue[] = [];
@@ -24,19 +29,48 @@ export function checkFormLabel(node: ts.Node, sourceFile: ts.SourceFile): A11yIs
       const isInsideFormControl = isMuiInput && hasFormControlAncestor(node);
       if (isInsideFormControl) return issues;
 
+      // Spread props may carry label dynamically
+      if (hasSpreadProps(node)) return issues;
+
       const attrs = node.attributes.properties;
 
-      const hasDirectLabel = attrs.some(attr => {
-        if (!ts.isJsxAttribute(attr)) return false;
-        const name = attr.name.getText(sourceFile);
-        return name === 'aria-label' ||
-               name === 'aria-labelledby' ||
-               name === 'label';
-      });
+      // Check for non-empty direct label attributes
+      const labelNames = ['aria-label', 'aria-labelledby', 'label'] as const;
+      let hasDirectLabel = false;
+      let hasEmptyLabel = false;
+      for (const name of labelNames) {
+        // Check if the attribute exists at all (covers dynamic values like label={var})
+        if (hasAttr(node, name, sourceFile)) {
+          const val = getAttrStringValue(node, name, sourceFile);
+          if (val === undefined) {
+            // Dynamic value — can't validate, assume it's fine
+            hasDirectLabel = true;
+            break;
+          }
+          if (val.trim().length > 0) {
+            hasDirectLabel = true;
+            break;
+          }
+          // val is empty string
+          hasEmptyLabel = true;
+        }
+      }
 
-      const hasPlaceholder = attrs.some(attr =>
-        ts.isJsxAttribute(attr) && attr.name.getText(sourceFile) === 'placeholder'
-      );
+      // Flag empty label attributes
+      if (hasEmptyLabel && !hasDirectLabel) {
+        const { line, character } = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile));
+        issues.push({
+          message: `Form control <${tagName}> has an empty \`aria-label\` or \`label\`. Provide meaningful label text.`,
+          rule: 'form-label',
+          severity: 'error',
+          line,
+          column: character,
+          snippet: node.getText(sourceFile),
+        });
+        return issues;
+      }
+
+      const hasPlaceholder = hasAttr(node, 'placeholder', sourceFile);
 
       const muiLabelPropNames = new Set([
         'InputLabelProps', 'inputProps', 'InputProps',
@@ -48,18 +82,13 @@ export function checkFormLabel(node: ts.Node, sourceFile: ts.SourceFile): A11yIs
         return muiLabelPropNames.has(attr.name.getText(sourceFile));
       });
 
-      const hasIdOnly = !hasDirectLabel && !hasPlaceholder && !hasMuiLabelProps && attrs.some(attr =>
-        ts.isJsxAttribute(attr) && attr.name.getText(sourceFile) === 'id'
-      );
+      const hasIdOnly = !hasDirectLabel && !hasPlaceholder && !hasMuiLabelProps && hasAttr(node, 'id', sourceFile);
 
-      // For hidden inputs, skip the check
-      const isHidden = attrs.some(attr =>
-        ts.isJsxAttribute(attr) &&
-        attr.name.getText(sourceFile) === 'type' &&
-        attr.initializer &&
-        ts.isStringLiteral(attr.initializer) &&
-        attr.initializer.text === 'hidden'
-      );
+      // For hidden inputs, skip the check.
+      // Dynamic type={…} returns undefined — intentionally treated as NOT hidden
+      // so the label check still fires (safer to require a label than to skip).
+      const typeVal = getAttrStringValue(node, 'type', sourceFile);
+      const isHidden = typeVal === 'hidden';
 
       if (!hasDirectLabel && !hasPlaceholder && !hasMuiLabelProps && !hasIdOnly && !isHidden) {
         const { line, character } = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile));

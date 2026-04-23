@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import * as crypto from 'crypto';
 import type { A11yIssue, AiFixResponse, AiFixAction } from '../types';
-import { callAiProvider } from './caller';
+import { callAiProvider, resolveModelDefault } from './caller';
 
 const SYSTEM_PROMPT = `You are an accessibility expert specializing in React and WCAG 2.1 compliance.
 Given a code snippet and an accessibility issue, provide a minimal, targeted fix.
@@ -143,7 +143,7 @@ export async function getAiFix(code: string, issue: A11yIssue, surroundingContex
   if (_secrets) {
     apiKey = await _secrets.get('a11y.aiApiKey');
   }
-  const model = config.get<string>('aiModel', 'gpt-4');
+  const model = resolveModelDefault(config.get<string>('aiModel', ''), provider);
 
   if (!apiKey) {
     const legacyKey = config.get<string>('aiApiKey', '');

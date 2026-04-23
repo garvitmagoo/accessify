@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
-import { scanForA11yIssues } from './scanner/astScanner';
 import type { A11yIssue } from './types';
+import { parallelScan } from './parallelScanner';
+import { loadConfig, applyConfig, isExcluded } from './config';
 
 /**
  * SARIF (Static Analysis Results Interchange Format) v2.1.0 exporter.
@@ -66,21 +67,14 @@ const RULE_METADATA: Record<string, { description: string; wcag?: string }> = {
   'color-contrast': { description: 'Text must meet WCAG AA contrast ratio', wcag: '1.4.3' },
   'heading-order': { description: 'Heading levels should follow logical order', wcag: '1.3.1' },
   'autocomplete-valid': { description: 'Input fields collecting personal data must have autocomplete', wcag: '1.3.5' },
-  'no-positive-tabindex': { description: 'Avoid positive tabIndex values that disrupt focus order', wcag: '2.4.3' },
-  'focus-visible': { description: 'Focus indicators must not be removed without replacement', wcag: '2.4.7' },
-  'page-title': { description: 'Pages must have a descriptive title element', wcag: '2.4.2' },
   'no-mouse-only-hover': { description: 'Hover content must also be keyboard-accessible', wcag: '1.4.13' },
   'nextjs-head-lang': { description: 'Next.js Html element must have a lang attribute', wcag: '3.1.1' },
   'nextjs-image-alt': { description: 'Next.js Image component must have alt text', wcag: '1.1.1' },
   'nextjs-link-text': { description: 'Next.js Link component must have discernible text', wcag: '1.1.1' },
-  'no-access-key': { description: 'Avoid accessKey — it creates inconsistent keyboard shortcuts', wcag: '2.1.1' },
   'no-autofocus': { description: 'Avoid autoFocus — it reduces usability for sighted and non-sighted users', wcag: '2.4.3' },
-  'no-redundant-roles': { description: 'Elements should not have ARIA roles that duplicate implicit semantics', wcag: '4.1.2' },
-  'media-has-caption': { description: 'Media elements must have captions for deaf/hard-of-hearing users', wcag: '1.2.2' },
   'interactive-supports-focus': { description: 'Interactive elements must be focusable for keyboard users', wcag: '2.1.1' },
-  'anchor-is-valid': { description: 'Anchor elements must have valid href attributes', wcag: '2.1.1' },
-  'prefer-semantic-elements': { description: 'Prefer native semantic HTML elements over ARIA roles on div/span', wcag: '1.3.1' },
   'no-noninteractive-element-interactions': { description: 'Non-interactive elements should not have event handlers — use interactive elements instead', wcag: '4.1.2' },
+  'svg-has-accessible-name': { description: 'SVG elements must have an accessible name via title, aria-label, or aria-labelledby', wcag: '1.1.1' },
 };
 
 /* ── Export commands ────────────────────────────────────────────────────── */
@@ -130,26 +124,34 @@ async function scanWorkspaceForExport(): Promise<ScanResult | null> {
     {
       location: vscode.ProgressLocation.Notification,
       title: 'Accessify: Scanning workspace for export...',
-      cancellable: false,
+      cancellable: true,
     },
-    async (progress) => {
-      const fileUris = await vscode.workspace.findFiles('**/*.{tsx,jsx}', '**/node_modules/**');
+    async (progress, token) => {
+      const config = await loadConfig();
+      const fileUris = (await vscode.workspace.findFiles('**/*.{tsx,jsx,html}', '**/node_modules/**'))
+        .filter(f => !isExcluded(config, f.fsPath));
+
+      const results = await parallelScan(fileUris, {
+        token,
+        filterIssues: issues => applyConfig(config, issues),
+        onProgress: (completed, total, file) => {
+          progress.report({
+            increment: (1 / total) * 100,
+            message: `(${completed}/${total}) ${file}`,
+          });
+        },
+      });
+
       const files: ScanResult['files'] = [];
       let totalIssues = 0;
-      const total = fileUris.length;
 
-      for (let i = 0; i < total; i++) {
-        const uri = fileUris[i];
-        progress.report({
-          increment: (1 / total) * 100,
-          message: `(${i + 1}/${total}) ${vscode.workspace.asRelativePath(uri)}`,
+      for (const r of results) {
+        files.push({
+          relativePath: r.relativePath,
+          absolutePath: r.uri.fsPath,
+          issues: r.issues,
         });
-
-        const doc = await vscode.workspace.openTextDocument(uri);
-        const issues = scanForA11yIssues(doc.getText(), doc.fileName);
-        const relativePath = vscode.workspace.asRelativePath(uri);
-        files.push({ relativePath, absolutePath: doc.fileName, issues });
-        totalIssues += issues.length;
+        totalIssues += r.issues.length;
       }
 
       return { files, totalIssues, scannedAt: new Date().toISOString() };
@@ -204,7 +206,7 @@ function buildSarif(scan: ScanResult): SarifLog {
         driver: {
           name: 'Accessify',
           version: require('../package.json').version,
-          informationUri: 'https://github.com/garvit-magoo/a11y-scanner-extension',
+          informationUri: 'https://github.com/garvit-magoo/accessify',
           rules,
         },
       },

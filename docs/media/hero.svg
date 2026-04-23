@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 200" width="960" height="200" role="img" aria-label="Accessify — Catch accessibility issues as you type">
+  <defs>
+    <linearGradient id="heroBg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0a1929"/>
+      <stop offset="0.5" stop-color="#0e2543"/>
+      <stop offset="1" stop-color="#0a1929"/>
+    </linearGradient>
+    <linearGradient id="iconBg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2B8BE8"/>
+      <stop offset="1" stop-color="#0057B3"/>
+    </linearGradient>
+    <style>
+      .title { font-family: -apple-system, Segoe UI, sans-serif; font-weight: 800; font-size: 56px; fill: #ffffff; }
+      .tag { font-family: -apple-system, Segoe UI, sans-serif; font-weight: 400; font-size: 18px; fill: #9eb5d8; }
+      .pill { font-family: -apple-system, Segoe UI, sans-serif; font-weight: 600; font-size: 11px; }
+      @keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
+      .icon-grp { animation: float 3s ease-in-out infinite; transform-origin: 108px 100px; }
+      @keyframes check-stroke { 0%, 30% { stroke-dashoffset: 60; } 60%, 100% { stroke-dashoffset: 0; } }
+      .check-path { stroke-dasharray: 60; animation: check-stroke 3s infinite; }
+    </style>
+  </defs>
+
+  <rect width="960" height="200" fill="url(#heroBg)" rx="10"/>
+
+  <!-- Decorative WCAG dots scattered -->
+  <g fill="#1a3a5c" opacity="0.45">
+    <circle cx="480" cy="36" r="2"/>
+    <circle cx="560" cy="60" r="1.5"/>
+    <circle cx="640" cy="28" r="2"/>
+    <circle cx="720" cy="52" r="1.5"/>
+    <circle cx="800" cy="36" r="2"/>
+    <circle cx="880" cy="64" r="1.5"/>
+    <circle cx="520" cy="160" r="2"/>
+    <circle cx="600" cy="176" r="1.5"/>
+    <circle cx="680" cy="148" r="2"/>
+    <circle cx="760" cy="168" r="1.5"/>
+    <circle cx="840" cy="156" r="2"/>
+  </g>
+
+  <!-- Icon on left -->
+  <g class="icon-grp">
+    <rect x="48" y="40" width="120" height="120" rx="24" fill="url(#iconBg)"/>
+    <!-- A -->
+    <polygon points="68,150 99,58 108,58 93,100 117,100 102,58 111,58 142,150 128,150 122,130 88,130 82,150" fill="#ffffff"/>
+    <!-- Check -->
+    <path class="check-path" d="M 80 108 L 96 120 L 128 88" stroke="#3DDC84" stroke-width="10" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  </g>
+
+  <!-- Text -->
+  <text x="200" y="104" class="title">Accessify</text>
+  <text x="200" y="136" class="tag">Catch WCAG 2.1 AA violations in React · JSX · TSX · HTML — as you type.</text>
+
+  <!-- Pills -->
+  <g transform="translate(200, 154)">
+    <rect x="0" y="0" width="82" height="22" rx="11" fill="#15304f" stroke="#2b5685"/>
+    <text x="41" y="15" text-anchor="middle" class="pill" fill="#9cdcfe">24 rules</text>
+
+    <rect x="92" y="0" width="98" height="22" rx="11" fill="#15304f" stroke="#2b5685"/>
+    <text x="141" y="15" text-anchor="middle" class="pill" fill="#9cdcfe">Auto-fixes</text>
+
+    <rect x="200" y="0" width="110" height="22" rx="11" fill="#15304f" stroke="#2b5685"/>
+    <text x="255" y="15" text-anchor="middle" class="pill" fill="#9cdcfe">Screen reader</text>
+
+    <rect x="320" y="0" width="98" height="22" rx="11" fill="#15304f" stroke="#2b5685"/>
+    <text x="369" y="15" text-anchor="middle" class="pill" fill="#9cdcfe">AI fixes</text>
+  </g>
+</svg>

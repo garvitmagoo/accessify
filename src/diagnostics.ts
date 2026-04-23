@@ -3,9 +3,10 @@ import { scanForA11yIssues } from './scanner/astScanner';
 import { toVscodeSeverity } from './types';
 import { loadConfig, applyConfig, isExcluded } from './config';
 import { getHelpUrl } from './scanner/axeIntegration';
+import { parallelScan } from './parallelScanner';
 
 const SUPPORTED_LANGUAGES = new Set([
-  'typescriptreact', 'javascriptreact', 'typescript', 'javascript',
+  'typescriptreact', 'javascriptreact', 'typescript', 'javascript', 'html',
 ]);
 
 let diagnosticCollection: vscode.DiagnosticCollection;
@@ -81,7 +82,11 @@ export async function updateDiagnostics(document: vscode.TextDocument): Promise<
       : document.lineAt(issue.line).range.end;
 
     const range = new vscode.Range(startPos, endPos);
-    const diagnostic = new vscode.Diagnostic(range, issue.message, toVscodeSeverity(issue.severity));
+    const globalSeverity = vscode.workspace.getConfiguration('a11y').get<string>('severity');
+    const severity = globalSeverity && globalSeverity !== 'warning'
+      ? toVscodeSeverity(globalSeverity as 'error' | 'warning' | 'info' | 'hint')
+      : toVscodeSeverity(issue.severity);
+    const diagnostic = new vscode.Diagnostic(range, issue.message, severity);
     diagnostic.source = 'Accessify';
 
     // Add clickable help link from axe-core metadata when available
@@ -114,40 +119,42 @@ export async function scanWorkspace(
 ): Promise<number> {
   const excludePattern = '{**/node_modules/**,**/.env*,**/config/**,**/*.config.*,**/dist/**,**/build/**,**/coverage/**}';
   const files = await vscode.workspace.findFiles(
-    '**/*.{tsx,jsx}',
+    '**/*.{tsx,jsx,html}',
     excludePattern
   );
 
   const config = await loadConfig();
+  const eligible = files.filter(f => !isExcluded(config, f.fsPath));
+
+  const results = await parallelScan(eligible, {
+    token,
+    filterIssues: issues => applyConfig(config, issues),
+    onProgress: (completed, total, file) => {
+      progress?.report({
+        increment: (1 / total) * 100,
+        message: `(${completed}/${total}) ${file}`,
+      });
+    },
+  });
+
+  diagnosticCollection.clear();
+  diagnosticDataMap.clear();
+
+  const globalSeverity = vscode.workspace.getConfiguration('a11y').get<string>('severity');
+
   let totalIssues = 0;
-  const total = files.length;
-
-  for (let i = 0; i < total; i++) {
-    if (token?.isCancellationRequested) { break; }
-
-    const fileUri = files[i];
-
-    if (isExcluded(config, fileUri.fsPath)) {
-      progress?.report({ increment: (1 / total) * 100, message: `(${i + 1}/${total}) skipped` });
-      continue;
-    }
-
-    progress?.report({
-      increment: (1 / total) * 100,
-      message: `(${i + 1}/${total}) ${vscode.workspace.asRelativePath(fileUri)}`,
-    });
-
-    const document = await vscode.workspace.openTextDocument(fileUri);
-    let issues = scanForA11yIssues(document.getText(), document.fileName);
-    issues = applyConfig(config, issues);
-
+  for (const { uri, issues } of results) {
+    const document = await vscode.workspace.openTextDocument(uri);
     const diagnostics = issues.map(issue => {
       const startPos = new vscode.Position(issue.line, issue.column);
       const endPos = issue.endLine !== undefined && issue.endColumn !== undefined
         ? new vscode.Position(issue.endLine, issue.endColumn)
         : document.lineAt(issue.line).range.end;
       const range = new vscode.Range(startPos, endPos);
-      const diagnostic = new vscode.Diagnostic(range, issue.message, toVscodeSeverity(issue.severity));
+      const severity = globalSeverity && globalSeverity !== 'warning'
+        ? toVscodeSeverity(globalSeverity as 'error' | 'warning' | 'info' | 'hint')
+        : toVscodeSeverity(issue.severity);
+      const diagnostic = new vscode.Diagnostic(range, issue.message, severity);
       diagnostic.source = 'Accessify';
       const issueHelpUrl = getHelpUrl(issue.rule);
       if (issueHelpUrl) {
@@ -158,7 +165,7 @@ export async function scanWorkspace(
       return diagnostic;
     });
 
-    diagnosticCollection.set(fileUri, diagnostics);
+    diagnosticCollection.set(uri, diagnostics);
     totalIssues += issues.length;
   }
 

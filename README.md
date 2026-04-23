@@ -1,148 +1,142 @@
-# Accessify — VS Code Extension
+<p align="center">
+  <img src="docs/media/hero.svg" alt="Accessify — catch WCAG 2.1 AA violations in React, JSX, TSX, and HTML as you type" width="100%"/>
+</p>
 
-[![Version](https://img.shields.io/visual-studio-marketplace/v/garvit-magoo.accessify?label=VS%20Marketplace)](https://marketplace.visualstudio.com/items?itemName=garvit-magoo.accessify)
-[![Installs](https://img.shields.io/visual-studio-marketplace/i/garvit-magoo.accessify)](https://marketplace.visualstudio.com/items?itemName=garvit-magoo.accessify)
-[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![WCAG 2.1 AA](https://img.shields.io/badge/WCAG-2.1%20AA-blue.svg)](https://www.w3.org/WAI/WCAG21/quickref/)
+<p align="center">
+  <a href="https://marketplace.visualstudio.com/items?itemName=garvit-magoo.accessify"><img src="https://img.shields.io/visual-studio-marketplace/v/garvit-magoo.accessify?label=VS%20Marketplace&color=0078D4" alt="Marketplace version"/></a>
+  <a href="https://marketplace.visualstudio.com/items?itemName=garvit-magoo.accessify"><img src="https://img.shields.io/visual-studio-marketplace/i/garvit-magoo.accessify?color=0078D4" alt="Installs"/></a>
+  <a href="https://marketplace.visualstudio.com/items?itemName=garvit-magoo.accessify"><img src="https://img.shields.io/visual-studio-marketplace/r/garvit-magoo.accessify?color=0078D4" alt="Rating"/></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="MIT licensed"/></a>
+  <a href="https://www.w3.org/WAI/WCAG21/quickref/"><img src="https://img.shields.io/badge/WCAG-2.1%20AA-3DDC84" alt="WCAG 2.1 AA"/></a>
+</p>
 
-AI-powered accessibility scanner for React/JSX/TSX projects. Detects WCAG 2.1 Level AA violations inline, previews screen reader output with voice simulation, generates accessibility tests, and provides intelligent fix suggestions with confidence scoring, AI fix caching, and axe-core validation.
+Accessify is a real-time accessibility linter for the editor. It scans React, JSX, TSX, and HTML against **24 WCAG 2.1 Level A & AA rules** as you type, offers one-click fixes (deterministic and AI-powered), and includes a screen reader preview so you can hear your UI the way assistive-technology users do.
 
-## Why Accessify?
+---
 
-Most accessibility tools only catch issues at runtime in the browser. Accessify shifts accessibility left into your editor:
+## See it in action
 
-- **Catch issues before code review** — real-time scanning as you type, not after deployment
-- **Understand the impact** — every issue links to WCAG criteria, axe-core docs, and impact levels
-- **Fix with confidence** — AI-generated fixes show confidence scores so you know what's safe to apply
-- **Hear what users hear** — the screen reader preview lets you experience your UI the way assistive technology users do
-- **Zero config** — works out of the box with 24 built-in rules; AI features are optional
+**Catch issues the moment you type them.**
 
-## Features
+<p align="center">
+  <img src="docs/media/demo-scan.svg" alt="A red squiggle appears under an img tag missing an alt attribute, with a diagnostic bubble explaining the rule violation" width="100%"/>
+</p>
 
-- **Real-time scanning** — Detects accessibility issues as you type with debounced diagnostics
-- **24 built-in rules** — Covers WCAG 2.1 Level AA success criteria (see [Rules](#rules))
-- **Inline diagnostics** — Issues appear as squiggly underlines in the editor
-- **Quick Fixes** — Click the lightbulb to apply fixes instantly with confidence % shown in the action title
-- **Static Fix Current File** — Preview and apply all deterministic fixes for the current file with a risk-aware preview panel
-- **AI-powered fixes** — Optional OpenAI / Azure OpenAI / Claude integration for context-aware fix suggestions
-- **AI Fix Entire File** — Let AI fix all issues in a file at once with a diff preview
-- **Bulk AI Fix Workspace** — AI-generate fixes for all files in the workspace (scans each file first, skips clean files)
-- **AI Fix Caching** — Both single-fix and full-file AI results are cached in-memory (10 min TTL) to avoid redundant API calls
-- **Confidence & Reasoning** — Every fix (static and AI) shows a confidence score (0–100%), color-coded risk level, WCAG references, and caveats
-- **axe-core Integration** — Fixes are cross-validated against axe-core rule metadata for impact levels, WCAG tags, and documentation links
-- **Screen Reader Preview** — Simulates how a screen reader would announce elements, with voice simulation (Web Speech API), per-row playback, speed control, and voice selection
-- **Accessibility Score** — Live score (0–100) in the status bar with severity breakdown
-- **Git Regression Tracking** — Compare issues between your working tree and the last commit
-- **Test Generation** — Auto-generate accessibility test cases from detected issues
-- **CI/CD Export** — Export SARIF (for GitHub Code Scanning) or JSON reports
-- **Configurable** — Enable/disable rules, set severity overrides, and exclude files via `.a11yrc.json`
+**Fix them with one keystroke.** Press `⌘.` (or `Ctrl+.`) to open Quick Fix.
 
-## Rules
+<p align="center">
+  <img src="docs/media/demo-autofix.svg" alt="The lightbulb appears, the quick fix menu opens, and the alt attribute is inserted into the img tag" width="100%"/>
+</p>
 
-| Rule | WCAG | Severity | Description |
-|------|------|----------|-------------|
-| `img-alt` | 1.1.1 | Error | `<img>` elements must have an `alt` attribute |
-| `button-label` | 4.1.2 | Error | Buttons must have accessible names (`aria-label`, text, etc.) |
-| `aria-role` | 4.1.2 | Error | ARIA `role` values must be valid WAI-ARIA roles |
-| `form-label` | 1.3.1 | Warning | Form inputs must have associated labels |
-| `click-events-have-key-events` | 2.1.1 | Warning | Non-interactive elements with `onClick` need keyboard handlers |
-| `aria-pattern` | 4.1.2 | Error | ARIA widget patterns must be correctly structured |
-| `color-contrast` | 1.4.3 | Warning | Inline styles must meet WCAG AA contrast ratio |
-| `heading-order` | 1.3.1 | Warning | Heading levels must follow a logical hierarchy |
-| `autocomplete-valid` | 1.3.5 | Warning | Personal data inputs must have valid `autoComplete` |
-| `no-positive-tabindex` | 2.4.3 | Warning | Avoid `tabIndex` > 0 (disrupts focus order) |
-| `focus-visible` | 2.4.7 | Warning | Don't remove `outline` without a replacement focus style |
-| `page-title` | 2.4.2 | Warning | `<Head>` must contain a `<title>` element |
-| `no-mouse-only-hover` | 1.4.13 | Warning | Hover content must also be keyboard-accessible |
-| `nextjs-head-lang` | 3.1.1 | Error | Next.js `<Html>` must have a `lang` attribute |
-| `nextjs-image-alt` | 1.1.1 | Error | Next.js `<Image>` must have an `alt` attribute |
-| `nextjs-link-text` | 1.1.1 | Warning | Next.js `<Link>` must have discernible text |
-| `anchor-is-valid` | 2.4.4 | Warning | Anchors must have a real destination; avoid `href="#"` or `javascript:` |
-| `no-redundant-roles` | Best Practice | Hint | Don't add ARIA roles that duplicate implicit semantics (e.g. `<button role="button">`) |
-| `no-autofocus` | 3.2.1 | Warning | `autoFocus` can disorient screen reader users on page load |
-| `interactive-supports-focus` | 2.1.1 | Warning | Non-interactive elements with event handlers must be focusable |
-| `media-has-caption` | 1.2.2 | Error | `<video>`/`<audio>` must have `<track kind="captions">` |
-| `no-access-key` | Best Practice | Warning | `accessKey` conflicts with assistive technology shortcuts |
-| `prefer-semantic-elements` | 1.3.1 | Warning | Prefer native semantic HTML (e.g. `<nav>`) over `<div role="navigation">` |
-| `no-noninteractive-element-interactions` | 4.1.2 | Warning | Non-interactive elements (`<div>`, `<span>`) should not have event handlers — use `<button>` or similar |
+**Hear what a screen reader will say.** Open `Accessify: Screen Reader Preview` for the active file.
 
-## Getting Started
+<p align="center">
+  <img src="docs/media/demo-screenreader.svg" alt="A side panel announces each landmark, heading, image, and button in the source file, in tab order" width="100%"/>
+</p>
 
-### Install from Marketplace
+---
 
-Search for **Accessify** in the VS Code Extensions panel, or run:
+## Why Accessify
+
+Most a11y tools catch issues at runtime, in the browser, after deployment. Accessify shifts that left into the editor:
+
+- **Real time.** Diagnostics appear as you type, with a debounced scan.
+- **Explain the why.** Every issue links to its WCAG criterion and the corresponding axe-core docs.
+- **Fix with confidence.** Static and AI fixes both show a confidence score and risk level before you apply them.
+- **Hear your UI.** The screen reader simulator announces elements out loud using the Web Speech API — voice, rate, and per-row playback.
+- **Zero config.** Works out of the box. AI features are opt-in.
+- **CI-ready.** Export SARIF for GitHub Code Scanning.
+
+---
+
+## Quick start
+
+Install from the Marketplace:
 
 ```bash
 code --install-extension garvit-magoo.accessify
 ```
 
-### Install from VSIX
+Or search **Accessify** in the Extensions panel.
 
-```bash
-code --install-extension accessify-1.0.0.vsix
-```
+That's it. Open any `.tsx` / `.jsx` / `.html` file and Accessify will start scanning. Issues show up as squiggles. Hover for the message; press `⌘.` (`Ctrl+.` on Windows/Linux) to apply a fix.
 
-### Usage
+### Keyboard shortcuts
 
-1. Open any `.tsx` or `.jsx` file — issues appear inline automatically
-2. Hover over a squiggly underline to see the issue detail
-3. Click the lightbulb (or press `Ctrl+.`) to see Quick Fix options
-4. Use keyboard shortcuts for fast access (see below)
+| Shortcut             | Action                    |
+| -------------------- | ------------------------- |
+| `⌘⌥R` / `Ctrl+Alt+R` | Open Accessibility Report |
+| `⌘⌥F` / `Ctrl+Alt+F` | Static Fix Current File   |
 
-## Commands
+### Commands
 
-Open the Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`) and type `A11y`:
+All commands are prefixed with `Accessify:` in the Command Palette (`⌘⇧P`):
 
-| Command | Description |
-|---------|-------------|
-| **A11y: Scan Workspace** | Scan all TSX/JSX files across the workspace |
-| **A11y: Show Accessibility Report** | Open the visual report panel |
-| **A11y: Screen Reader Preview** | Simulate screen reader announcements with voice playback |
-| **A11y: Static Fix Current File** | Preview and apply all static fixes for the current file |
-| **A11y: AI Fix Entire File** | AI-generated fixes for all issues (requires AI provider) |
-| **A11y: Bulk AI Fix Workspace** | AI-fix all files in the workspace (scans first, skips clean files) |
-| **A11y: Static Fix Workspace** | Apply static fixes across the entire workspace |
-| **A11y: Compare with Last Commit** | Show new/fixed issues vs. the last git commit |
-| **A11y: Generate Accessibility Tests** | Auto-generate test cases from detected issues |
-| **A11y: Export SARIF Report** | Export for CI/CD (GitHub Code Scanning compatible) |
-| **A11y: Export JSON Report** | Export as JSON |
-| **A11y: Set AI API Key** | Store your API key securely |
+- `Show Accessibility Report`
+- `Screen Reader Preview`
+- `Static Fix Current File` · `Static Fix Workspace`
+- `AI Fix Entire File` · `Bulk AI Fix Workspace`
+- `Generate A11y Unit Tests`
+- `Export Report` (SARIF or JSON)
+- `Set AI API Key`
+- `Open Settings`
 
-## Keyboard Shortcuts
+---
 
-| Shortcut | Command |
-|----------|---------|
-| `Ctrl+Alt+R` (`Cmd+Alt+R`) | Show Report |
-| `Ctrl+Alt+F` (`Cmd+Alt+F`) | Static Fix Current File |
-| `Ctrl+Alt+Shift+A` (`Cmd+Alt+Shift+A`) | Scan Workspace |
+## Rules (24)
 
-## Configuration
+Accessify ships with 24 rules covering WCAG 2.1 Level A and AA.
 
-### VS Code Settings
+| Rule                                     | WCAG   | Severity | What it catches                                               |
+| ---------------------------------------- | ------ | -------- | ------------------------------------------------------------- |
+| `img-alt`                                | 1.1.1  | Error    | `<img>` without an `alt` attribute                            |
+| `nextjs-image-alt`                       | 1.1.1  | Error    | Next.js `<Image>` without `alt`                               |
+| `nextjs-link-text`                       | 1.1.1  | Warning  | Next.js `<Link>` without discernible text                     |
+| `svg-has-accessible-name`                | 1.1.1  | Warning  | `<svg>` missing `<title>`, `aria-label`, or `aria-labelledby` |
+| `media-has-caption`                      | 1.2.2  | Error    | `<video>` / `<audio>` without captions (unless muted)         |
+| `form-label`                             | 1.3.1  | Warning  | Form inputs without an associated label                       |
+| `label-has-associated-control`           | 1.3.1  | Warning  | `<label>` not linked to a control via `htmlFor` or wrapping   |
+| `heading-order`                          | 1.3.1  | Warning  | Heading levels skipped (e.g. `h1` → `h3`)                     |
+| `prefer-semantic-elements`               | 1.3.1  | Warning  | `<div role="…">` where a native element exists                |
+| `autocomplete-valid`                     | 1.3.5  | Warning  | Personal-data inputs without valid `autoComplete`             |
+| `color-contrast`                         | 1.4.3  | Warning  | Inline / Tailwind foreground+background below 4.5:1           |
+| `no-mouse-only-hover`                    | 1.4.13 | Warning  | Hover content with no keyboard equivalent                     |
+| `click-events-have-key-events`           | 2.1.1  | Warning  | `onClick` on non-interactive element without keyboard handler |
+| `interactive-supports-focus`             | 2.1.1  | Warning  | Interactive element that isn't focusable                      |
+| `skip-link`                              | 2.4.1  | Hint     | Layout missing a "Skip to content" link                       |
+| `page-title`                             | 2.4.2  | Warning  | `<Head>` without a `<title>`                                  |
+| `no-autofocus`                           | 2.4.3  | Warning  | `autoFocus` that disorients screen reader users               |
+| `anchor-is-valid`                        | 2.4.4  | Warning  | `<a href="#">` or `href="javascript:void(0)"`                 |
+| `focus-visible`                          | 2.4.7  | Warning  | Removes focus indicator without an alternative                |
+| `nextjs-head-lang`                       | 3.1.1  | Error    | Next.js `<Html>` without `lang`                               |
+| `aria-role`                              | 4.1.2  | Error    | Invalid ARIA role value                                       |
+| `aria-pattern`                           | 4.1.2  | Error    | ARIA widget patterns missing required structure               |
+| `button-label`                           | 4.1.2  | Error    | `<button>` without an accessible name                         |
+| `no-noninteractive-element-interactions` | 4.1.2  | Warning  | Event handlers on non-interactive elements                    |
 
-| Setting | Default | Description |
-|---------|---------|-------------|
-| `a11y.scanOnSave` | `true` | Auto-scan on file save |
-| `a11y.scanOnOpen` | `true` | Auto-scan when a file is opened |
-| `a11y.severity` | `"warning"` | Default diagnostic severity |
-| `a11y.aiProvider` | `"none"` | AI provider: `"none"`, `"openai"`, `"azure-openai"`, `"claude"` |
-| `a11y.aiEndpoint` | `""` | Azure OpenAI endpoint URL |
-| `a11y.aiModel` | `"gpt-4"` | Model/deployment name |
-| `a11y.aiBatchConcurrency` | `10` | Files processed in parallel during bulk AI fix (1–10) |
+You can disable any rule, override severity, or scope rules by glob in `.a11yrc.json`.
 
-### Enable AI Fixes
+---
 
-1. Run **A11y: Set AI API Key** from the Command Palette to store your key securely
-2. Set the provider in VS Code settings:
+## AI fixes (optional)
+
+Accessify supports OpenAI, Azure OpenAI, and Anthropic Claude for context-aware fixes. AI is **off** by default; to enable:
+
+1. Run `Accessify: Set AI API Key` and paste your key (stored in VS Code secret storage).
+2. Run `Accessify: Open Settings` and pick a provider.
+3. Use `Accessify: AI Fix Entire File` for a single file or `Bulk AI Fix Workspace` for everything.
+
+Each AI fix shows confidence, reasoning, and a diff preview before anything is written. Caching is in-memory with a 10-minute TTL to keep API usage low.
 
 ```json
+// settings.json
 {
-  "a11y.aiProvider": "openai",
-  "a11y.aiModel": "gpt-4"
+  "a11y.aiProvider": "claude",
+  "a11y.aiModel": "claude-sonnet-4-20250514"
 }
 ```
 
-For Azure OpenAI, also set the endpoint:
+For Azure OpenAI:
 
 ```json
 {
@@ -152,18 +146,11 @@ For Azure OpenAI, also set the endpoint:
 }
 ```
 
-For Claude (Anthropic):
+---
 
-```json
-{
-  "a11y.aiProvider": "claude",
-  "a11y.aiModel": "claude-sonnet-4-20250514"
-}
-```
+## Project config (`.a11yrc.json`)
 
-### Project-Level Config (`.a11yrc.json`)
-
-Create a `.a11yrc.json` in your workspace root to customize rules and exclusions:
+Drop a `.a11yrc.json` at your project root to customize rules and exclusions:
 
 ```json
 {
@@ -171,71 +158,104 @@ Create a `.a11yrc.json` in your workspace root to customize rules and exclusions
     "color-contrast": { "severity": "error" },
     "heading-order": false
   },
-  "exclude": [
-    "**/test/**",
-    "**/storybook/**"
-  ]
+  "exclude": ["**/test/**", "**/storybook/**"],
+  "aiExclude": ["**/legacy/**"]
 }
 ```
 
-## CI/CD Integration
+Disabled rules and excluded files are respected by diagnostics, the report panel, SARIF/JSON exports, and bulk fixes.
 
-Export a SARIF report and upload it to GitHub Code Scanning:
+---
+
+## CI / CD
+
+Generate a SARIF report and feed it into GitHub Code Scanning:
+
+```bash
+code --command a11y.exportReport
+```
 
 ```yaml
 # .github/workflows/a11y.yml
-- name: Upload SARIF
-  uses: github/codeql-action/upload-sarif@v3
+- uses: github/codeql-action/upload-sarif@v3
   with:
     sarif_file: a11y-report.sarif
 ```
 
+---
+
+## Settings reference
+
+| Setting                   | Default   | Description                                         |
+| ------------------------- | --------- | --------------------------------------------------- |
+| `a11y.scanOnSave`         | `true`    | Scan on save                                        |
+| `a11y.scanOnOpen`         | `true`    | Scan when a file is opened                          |
+| `a11y.severity`           | `warning` | Default diagnostic severity                         |
+| `a11y.aiProvider`         | `none`    | `openai` / `azure-openai` / `claude` / `none`       |
+| `a11y.aiModel`            | `""`      | Model / deployment name (provider default if blank) |
+| `a11y.aiEndpoint`         | `""`      | Required for Azure OpenAI                           |
+| `a11y.aiBatchConcurrency` | `10`      | Parallel files during bulk AI fix (1–10)            |
+| `a11y.scanConcurrency`    | `8`       | Parallel files during workspace scans (1–32)        |
+
+---
+
 ## Development
 
 ```bash
-git clone https://github.com/garvit-magoo/a11y-scanner-extension.git
-cd a11y-scanner-extension
+git clone https://github.com/garvit-magoo/accessify.git
+cd accessify
 npm install
 npm run compile
 ```
 
-Press `F5` in VS Code to launch the Extension Development Host.
-
-### Run Tests
+Press `F5` to launch the Extension Development Host.
 
 ```bash
-npm test
+npm test                  # unit tests
+npm run test:integration  # integration tests in a real VS Code instance
+npx @vscode/vsce package  # build a .vsix
 ```
 
-### Package
-
-```bash
-npm run package
-```
+---
 
 ## Architecture
 
 ```
 src/
-├── extension.ts          # Extension entry point, command registration
-├── diagnostics.ts        # Real-time diagnostic pipeline
-├── codeActions.ts        # Quick fixes, static fix, AI fix commands
-├── config.ts             # .a11yrc.json loader with caching
-├── types.ts              # Shared type definitions
+├── extension.ts          Extension entry point, command registration
+├── diagnostics.ts        Real-time diagnostic pipeline
+├── codeActions.ts        Quick fixes, static fix, AI fix commands
+├── config.ts             .a11yrc.json loader with caching
+├── statusBar.ts          Accessibility score status bar item
+├── parallelScanner.ts    Worker pool for workspace-wide scans
 ├── ai/
-│   ├── caller.ts         # Shared AI API caller (OpenAI, Azure, Claude)
-│   ├── provider.ts       # Single-issue AI fix with caching
-│   └── fullFileFix.ts    # Full-file AI fix with caching
-├── jsx/
-│   └── utils.ts          # Pure JSX string manipulation utilities
+│   ├── caller.ts         Shared AI caller with retry/backoff
+│   ├── provider.ts       Single-issue AI fix + cache
+│   └── fullFileFix.ts    Full-file AI fix + cache
 ├── scanner/
-│   ├── astScanner.ts     # AST walker, rule orchestration
-│   ├── axeIntegration.ts # axe-core metadata, fix validation
-│   ├── jsxValidator.ts   # JSX syntax validation
-│   └── rules/            # 22 individual rule checkers
-└── webview/              # 5 webview panels (report, diff, bulk fix, etc.)
+│   ├── astScanner.ts     AST walker, rule orchestration
+│   ├── axeIntegration.ts axe-core metadata + fix validation
+│   ├── screenReaderSimulator.ts  SR announcement engine
+│   └── rules/            24 individual rule checkers
+└── webview/
+    ├── reportPanel.ts            Accessibility report
+    ├── screenReaderPanel.ts      Screen reader simulator UI
+    ├── configPanel.ts            Visual settings
+    ├── diffPreviewPanel.ts       AI fix diff preview
+    ├── bulkFixPreviewPanel.ts    Bulk fix preview
+    └── utils.ts                  Shared webview helpers (CSP, command bar)
 ```
+
+---
+
+## Contributing
+
+Bug reports and PRs welcome at [github.com/garvit-magoo/accessify](https://github.com/garvit-magoo/accessify).
+
+When proposing a new rule, include the WCAG criterion it maps to, a sample positive case, a sample negative case, and ideally a static fix.
+
+---
 
 ## License
 
-[MIT](LICENSE)
+[MIT](LICENSE) © Garvit Magoo

@@ -68,13 +68,13 @@ export class ScreenReaderPanel {
   }
 
   public static async createOrShow(): Promise<void> {
-    const column = vscode.ViewColumn.Beside;
+    const column = vscode.ViewColumn.Two;
     // Capture the active editor BEFORE creating/revealing the panel,
     // because the webview steals focus and makes activeTextEditor undefined.
     const currentEditor = vscode.window.activeTextEditor;
     // Fall back through visible editors / open tabs if no active editor
     const initialDoc = currentEditor?.document ?? await resolveActiveDocument(
-      new Set(['typescriptreact', 'javascriptreact', 'typescript', 'javascript']),
+      new Set(['typescriptreact', 'javascriptreact', 'typescript', 'javascript', 'html']),
     );
 
     if (ScreenReaderPanel.currentPanel) {
@@ -110,9 +110,9 @@ export class ScreenReaderPanel {
       return;
     }
 
-    const supported = ['typescriptreact', 'javascriptreact', 'typescript', 'javascript'];
+    const supported = ['typescriptreact', 'javascriptreact', 'typescript', 'javascript', 'html'];
     if (!supported.includes(doc.languageId)) {
-      this.panel.webview.html = buildEmptyHtml(this.panel.webview, 'Not a JSX/TSX file');
+      this.panel.webview.html = buildEmptyHtml(this.panel.webview, 'Not a JSX/TSX/HTML file');
       return;
     }
 
@@ -430,13 +430,13 @@ function buildHtml(items: ScreenReaderAnnouncement[], tabStops: TabStop[], fileP
     </div>
   </div>
 
-  <div class="tabs" role="tablist">
-    <button class="tab-btn active" data-tab="all" role="tab" aria-selected="true">All Elements</button>
-    <button class="tab-btn" data-tab="outline" role="tab" aria-selected="false">Heading Outline</button>
-    <button class="tab-btn" data-tab="taborder" role="tab" aria-selected="false">&#9000; Tab Order</button>
+  <div class="tabs" role="tablist" aria-label="Screen reader preview tabs">
+    <button class="tab-btn active" data-tab="all" role="tab" id="tab-btn-all" aria-selected="true" aria-controls="tab-all" tabindex="0">All Elements</button>
+    <button class="tab-btn" data-tab="outline" role="tab" id="tab-btn-outline" aria-selected="false" aria-controls="tab-outline" tabindex="-1">Heading Outline</button>
+    <button class="tab-btn" data-tab="taborder" role="tab" id="tab-btn-taborder" aria-selected="false" aria-controls="tab-taborder" tabindex="-1">&#9000; Tab Order</button>
   </div>
 
-  <div id="tab-all" class="tab-content active" role="tabpanel">
+  <div id="tab-all" class="tab-content active" role="tabpanel" aria-labelledby="tab-btn-all">
     <div class="voice-toolbar">
       <div class="toolbar-row">
         <button id="playAll" title="Read all announcements sequentially">&#9654; Play All</button>
@@ -467,14 +467,14 @@ function buildHtml(items: ScreenReaderAnnouncement[], tabStops: TabStop[], fileP
       : `<table><tbody>${rows}</tbody></table>`}
   </div>
 
-  <div id="tab-outline" class="tab-content" role="tabpanel">
+  <div id="tab-outline" class="tab-content" role="tabpanel" aria-labelledby="tab-btn-outline">
     <h2 style="font-size:1em; margin:0 0 10px; opacity:.7;">Heading Structure</h2>
     <div class="outline-section">
       ${headingOutline}
     </div>
   </div>
 
-  <div id="tab-taborder" class="tab-content" role="tabpanel">
+  <div id="tab-taborder" class="tab-content" role="tabpanel" aria-labelledby="tab-btn-taborder">
     <h2 style="font-size:1em; margin:0 0 10px; opacity:.7;">&#9000; Keyboard Tab Order</h2>
     <p style="font-size:.82em; opacity:.6; margin:0 0 12px;">Simulated sequence of elements reached by pressing Tab. Elements with positive tabIndex appear first (anti-pattern), followed by natural source order.</p>
     <div class="summary" style="margin-bottom:14px;">
@@ -504,16 +504,41 @@ function buildHtml(items: ScreenReaderAnnouncement[], tabStops: TabStop[], fileP
     let activeFilter = 'all';
     let issuesOnly = false;
 
-    // ── Tab switching ──
-    document.querySelectorAll('.tab-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        document.querySelectorAll('.tab-btn').forEach(b => { b.classList.remove('active'); b.setAttribute('aria-selected', 'false'); });
-        document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-        btn.classList.add('active');
-        btn.setAttribute('aria-selected', 'true');
-        const tabId = 'tab-' + btn.dataset.tab;
-        const el = document.getElementById(tabId);
-        if (el) el.classList.add('active');
+    // ── Tab switching with roving tabindex & arrow keys ──
+    const tabBtns = Array.from(document.querySelectorAll('.tab-btn'));
+    function activateTab(btn) {
+      tabBtns.forEach(b => {
+        b.classList.remove('active');
+        b.setAttribute('aria-selected', 'false');
+        b.setAttribute('tabindex', '-1');
+      });
+      document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+      btn.classList.add('active');
+      btn.setAttribute('aria-selected', 'true');
+      btn.setAttribute('tabindex', '0');
+      btn.focus();
+      const tabId = 'tab-' + btn.dataset.tab;
+      const el = document.getElementById(tabId);
+      if (el) el.classList.add('active');
+    }
+    tabBtns.forEach((btn, idx) => {
+      btn.addEventListener('click', () => activateTab(btn));
+      btn.addEventListener('keydown', (e) => {
+        let nextIdx = -1;
+        if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+          e.preventDefault();
+          nextIdx = (idx + 1) % tabBtns.length;
+        } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+          e.preventDefault();
+          nextIdx = (idx - 1 + tabBtns.length) % tabBtns.length;
+        } else if (e.key === 'Home') {
+          e.preventDefault();
+          nextIdx = 0;
+        } else if (e.key === 'End') {
+          e.preventDefault();
+          nextIdx = tabBtns.length - 1;
+        }
+        if (nextIdx >= 0) activateTab(tabBtns[nextIdx]);
       });
     });
 

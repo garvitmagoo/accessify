@@ -2,6 +2,8 @@ import * as vscode from 'vscode';
 import { scanForA11yIssues } from '../scanner/astScanner';
 import type { A11yIssue } from '../types';
 import { escapeHtml, getNonce, getCommandBarCss, getCommandBarHtml, getCommandBarJs, ALLOWED_COMMANDS } from './utils';
+import { parallelScan } from '../parallelScanner';
+import { loadConfig, applyConfig, isExcluded } from '../config';
 
 /**
  * Generates an HTML report of accessibility issues across the workspace.
@@ -76,7 +78,7 @@ export class A11yReportPanel {
   }
 
   public static async createOrShow(_context: vscode.ExtensionContext, fileUri?: vscode.Uri): Promise<void> {
-    const column = vscode.ViewColumn.Beside;
+    const column = vscode.ViewColumn.Two;
 
     if (A11yReportPanel.currentPanel) {
       A11yReportPanel.currentPanel.panel.reveal(column);
@@ -111,8 +113,10 @@ export class A11yReportPanel {
     let totalIssues = 0;
     const ruleCount: Record<string, number> = {};
 
+    const config = await loadConfig();
     const document = await vscode.workspace.openTextDocument(fileUri);
-    const issues = scanForA11yIssues(document.getText(), document.fileName);
+    let issues = scanForA11yIssues(document.getText(), document.fileName);
+    issues = applyConfig(config, issues);
     const relativePath = vscode.workspace.asRelativePath(fileUri);
 
     if (issues.length > 0) {
@@ -132,38 +136,38 @@ export class A11yReportPanel {
   }
 
   public async update(): Promise<void> {
-    const files = await vscode.workspace.findFiles('**/*.{tsx,jsx}', '**/node_modules/**');
+    const files = await vscode.workspace.findFiles('**/*.{tsx,jsx,html}', '**/node_modules/**');
+
+    const config = await loadConfig();
+    const eligible = files.filter(f => !isExcluded(config, f.fsPath));
 
     const issuesByFile: { file: string; uri: string; issues: { message: string; rule: string; severity: string; line: number }[] }[] = [];
     let totalIssues = 0;
     const ruleCount: Record<string, number> = {};
-    const total = files.length;
+    const total = eligible.length;
 
-    for (let i = 0; i < total; i++) {
-      const fileUri = files[i];
-      const relativePath = vscode.workspace.asRelativePath(fileUri);
+    const results = await parallelScan(eligible, {
+      filterIssues: issues => applyConfig(config, issues),
+      onProgress: (completed, scanTotal, file) => {
+        this.panel.webview.postMessage({
+          type: 'scanProgress',
+          current: completed,
+          total: scanTotal,
+          file,
+        });
+      },
+    });
 
-      this.panel.webview.postMessage({
-        type: 'scanProgress',
-        current: i + 1,
-        total,
-        file: relativePath,
+    for (const r of results) {
+      issuesByFile.push({
+        file: r.relativePath,
+        uri: r.uri.toString(),
+        issues: r.issues.map((i: A11yIssue) => ({ message: i.message, rule: i.rule, severity: i.severity, line: i.line + 1 })),
       });
-
-      const document = await vscode.workspace.openTextDocument(fileUri);
-      const issues = scanForA11yIssues(document.getText(), document.fileName);
-
-      if (issues.length > 0) {
-        issuesByFile.push({
-          file: relativePath,
-          uri: fileUri.toString(),
-          issues: issues.map((i: A11yIssue) => ({ message: i.message, rule: i.rule, severity: i.severity, line: i.line + 1 })),
-        });
-        totalIssues += issues.length;
-        issues.forEach((i: A11yIssue) => {
-          ruleCount[i.rule] = (ruleCount[i.rule] || 0) + 1;
-        });
-      }
+      totalIssues += r.issues.length;
+      r.issues.forEach((i: A11yIssue) => {
+        ruleCount[i.rule] = (ruleCount[i.rule] || 0) + 1;
+      });
     }
 
     this.panel.webview.html = this.getHtml(issuesByFile, totalIssues, ruleCount, total);
@@ -184,7 +188,7 @@ export class A11yReportPanel {
       .sort((a, b) => b.issues.length - a.issues.length)
       .map(f => {
         const issueRows = f.issues.map(i => `
-          <tr class="issue-row" data-uri="${escapeHtml(f.uri)}" data-line="${i.line}">
+          <tr class="issue-row" data-uri="${escapeHtml(f.uri)}" data-line="${i.line}" role="button" tabindex="0" aria-label="${i.severity.toUpperCase()}: ${escapeHtml(i.message)} (${i.rule}, line ${i.line})">
             <td class="severity-cell"><span class="severity ${i.severity}">${i.severity.toUpperCase()}</span></td>
             <td class="line-cell">Line ${i.line}</td>
             <td>${escapeHtml(i.message)}</td>
@@ -194,7 +198,7 @@ export class A11yReportPanel {
 
         return `
           <div class="file-section">
-            <div class="file-header" data-toggle="collapse">
+            <div class="file-header" data-toggle="collapse" role="button" tabindex="0" aria-expanded="true" aria-label="${escapeHtml(f.file)}, ${f.issues.length} issues">
               <span class="chevron">&#9660;</span>
               <strong title="${escapeHtml(f.file)}" class="file-name" data-uri="${escapeHtml(f.uri)}">${escapeHtml(f.file)}</strong>
               <span class="badge">${f.issues.length}</span>
@@ -261,6 +265,7 @@ export class A11yReportPanel {
     .file-section.collapsed .chevron { transform: rotate(-90deg); }
     .file-header { padding: 10px 14px; cursor: pointer; display: flex; align-items: center; gap: 8px; background: var(--vscode-sideBar-background, var(--card-bg)); user-select: none; transition: background .15s; }
     .file-header:hover { background: var(--vscode-list-hoverBackground); }
+    .file-header:focus-visible { outline: 2px solid var(--blue); outline-offset: -2px; }
     .file-header strong { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .9em; }
     .file-header strong.file-name { cursor: pointer; }
     .file-header strong.file-name:hover { text-decoration: underline; color: var(--vscode-textLink-foreground); }
@@ -271,6 +276,7 @@ export class A11yReportPanel {
     .issues-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
     .issue-row { transition: background .15s; cursor: pointer; }
     .issue-row:hover { background: var(--card-bg); }
+    .issue-row:focus-visible { outline: 2px solid var(--blue); outline-offset: -2px; }
     .issue-row td { padding: 8px 12px; border-top: 1px solid var(--border); font-size: .85em; vertical-align: middle; word-wrap: break-word; overflow-wrap: break-word; }
     .line-cell { color: var(--vscode-textLink-foreground); }
     .issue-row:hover .line-cell { text-decoration: underline; }
@@ -278,7 +284,7 @@ export class A11yReportPanel {
     .issue-row td:nth-child(2) { width: 70px; white-space: nowrap; font-variant-numeric: tabular-nums; vertical-align: middle; }
     .issue-row td:nth-child(4) { width: 140px; vertical-align: middle; }
     .severity { font-weight: 700; font-size: .75em; text-transform: uppercase; letter-spacing: .5px; padding: 4px 10px; border-radius: 10px; display: inline-block; white-space: nowrap; line-height: 1; }
-    .severity.error { color: #fff; background: var(--red); }
+    .severity.error { color: #000; background: var(--red); }
     .severity.warning { color: #000; background: var(--orange); }
     .severity.info { color: #000; background: var(--blue); }
     .severity.hint { color: #000; background: var(--green); }
@@ -344,7 +350,15 @@ export class A11yReportPanel {
 
     document.querySelectorAll('[data-toggle="collapse"]').forEach(function(el) {
       el.addEventListener('click', function() {
-        this.parentElement.classList.toggle('collapsed');
+        var section = this.parentElement;
+        section.classList.toggle('collapsed');
+        this.setAttribute('aria-expanded', !section.classList.contains('collapsed'));
+      });
+      el.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          this.click();
+        }
       });
     });
 
@@ -362,6 +376,12 @@ export class A11yReportPanel {
         var line = parseInt(row.getAttribute('data-line'), 10);
         if (uri) {
           vscode.postMessage({ type: 'openFile', uri: uri, line: line });
+        }
+      });
+      row.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          row.click();
         }
       });
     });
@@ -414,21 +434,21 @@ export class A11yReportPanel {
       'color-contrast':                  { level: 'AA', principle: 'Perceivable' },
       'heading-order':                   { level: 'A',  principle: 'Perceivable' },
       'autocomplete-valid':              { level: 'AA', principle: 'Perceivable' },
-      'no-positive-tabindex':            { level: 'A',  principle: 'Operable' },
-      'focus-visible':                   { level: 'AA', principle: 'Operable' },
-      'page-title':                      { level: 'A',  principle: 'Operable' },
       'no-mouse-only-hover':             { level: 'AA', principle: 'Perceivable' },
       'nextjs-head-lang':                { level: 'A',  principle: 'Understandable' },
       'nextjs-image-alt':                { level: 'A',  principle: 'Perceivable' },
       'nextjs-link-text':                { level: 'A',  principle: 'Perceivable' },
-      'no-access-key':                   { level: 'A',  principle: 'Operable' },
       'no-autofocus':                    { level: 'A',  principle: 'Operable' },
-      'no-redundant-roles':              { level: 'A',  principle: 'Robust' },
-      'media-has-caption':               { level: 'A',  principle: 'Perceivable' },
       'interactive-supports-focus':       { level: 'A',  principle: 'Operable' },
-      'anchor-is-valid':                 { level: 'A',  principle: 'Operable' },
-      'prefer-semantic-elements':          { level: 'A',  principle: 'Perceivable' },
       'no-noninteractive-element-interactions': { level: 'A', principle: 'Robust' },
+      'svg-has-accessible-name':          { level: 'A',  principle: 'Perceivable' },
+      'anchor-is-valid':                    { level: 'A',  principle: 'Operable' },
+      'focus-visible':                      { level: 'AA', principle: 'Operable' },
+      'label-has-associated-control':        { level: 'A',  principle: 'Perceivable' },
+      'media-has-caption':                   { level: 'A',  principle: 'Perceivable' },
+      'page-title':                          { level: 'A',  principle: 'Operable' },
+      'prefer-semantic-elements':            { level: 'A',  principle: 'Robust' },
+      'skip-link':                           { level: 'A',  principle: 'Operable' },
     };
 
     const severityMultiplier: Record<string, number> = {

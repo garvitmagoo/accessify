@@ -43,7 +43,7 @@ const HEADING_RE = /^h([1-6])$/;
  * a screen reader would say for each semantic / interactive element.
  */
 export function simulateScreenReader(sourceCode: string, fileName: string): ScreenReaderAnnouncement[] {
-  const isTsx = fileName.endsWith('.tsx') || fileName.endsWith('.jsx');
+  const isTsx = fileName.endsWith('.tsx') || fileName.endsWith('.jsx') || fileName.endsWith('.html');
   const sourceFile = ts.createSourceFile(
     fileName,
     sourceCode,
@@ -499,7 +499,7 @@ const FOCUSABLE_ELEMENTS = new Set([
  * elements in source order. Elements with tabIndex=-1 are skipped.
  */
 export function simulateTabOrder(sourceCode: string, fileName: string): TabStop[] {
-  const isTsx = fileName.endsWith('.tsx') || fileName.endsWith('.jsx');
+  const isTsx = fileName.endsWith('.tsx') || fileName.endsWith('.jsx') || fileName.endsWith('.html');
   const sourceFile = ts.createSourceFile(
     fileName, sourceCode, ts.ScriptTarget.Latest, true,
     isTsx ? ts.ScriptKind.TSX : ts.ScriptKind.TS,

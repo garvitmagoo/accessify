@@ -5,13 +5,12 @@ import { A11yReportPanel } from './webview/reportPanel';
 import { ScreenReaderPanel } from './webview/screenReaderPanel';
 import { createStatusBarItem, updateStatusBarScore } from './statusBar';
 import { generateA11yTests } from './testGenerator';
-import { reviewPullRequest } from './prReview';
 import { exportSarif, exportJson } from './exportReport';
-import { initAiProvider, setAiApiKey, clearAiFixCache } from './ai/provider';
+import { initAiProvider, setAiApiKey, clearAiFixCache, getStoredApiKey } from './ai/provider';
 import { getFullFileFix, showFixLog, clearFullFixCache } from './ai/fullFileFix';
-import { scanForA11yIssues } from './scanner/astScanner';
 import { DiffPreviewPanel } from './webview/diffPreviewPanel';
 import { BulkFixPreviewPanel } from './webview/bulkFixPreviewPanel';
+import { ConfigPanel } from './webview/configPanel';
 import { invalidateConfigCache } from './config';
 import { resolveActiveDocument } from './editorUtils';
 
@@ -21,29 +20,29 @@ export function activate(context: vscode.ExtensionContext): void {
   initDiagnostics(context);
   initAiProvider(context.secrets);
 
-  const config = vscode.workspace.getConfiguration('a11y');
+  // Always register listeners; gate on config inside the handler so
+  // toggling the setting takes effect without reloading.
+  context.subscriptions.push(
+    vscode.window.onDidChangeActiveTextEditor(editor => {
+      if (editor && vscode.workspace.getConfiguration('a11y').get<boolean>('scanOnOpen', true)) {
+        updateDiagnostics(editor.document);
+      }
+    }),
+  );
 
-  if (config.get<boolean>('scanOnOpen', true)) {
-    context.subscriptions.push(
-      vscode.window.onDidChangeActiveTextEditor(editor => {
-        if (editor) {
-          updateDiagnostics(editor.document);
-        }
-      }),
-    );
-  }
-
-  if (config.get<boolean>('scanOnSave', true)) {
-    context.subscriptions.push(
-      vscode.workspace.onDidSaveTextDocument(document => {
+  context.subscriptions.push(
+    vscode.workspace.onDidSaveTextDocument(document => {
+      if (vscode.workspace.getConfiguration('a11y').get<boolean>('scanOnSave', true)) {
         updateDiagnostics(document);
-      }),
-    );
-  }
+      }
+    }),
+  );
 
   context.subscriptions.push(
     vscode.workspace.onDidOpenTextDocument(document => {
-      updateDiagnostics(document);
+      if (vscode.workspace.getConfiguration('a11y').get<boolean>('scanOnOpen', true)) {
+        updateDiagnostics(document);
+      }
     }),
   );
 
@@ -112,6 +111,7 @@ export function activate(context: vscode.ExtensionContext): void {
       [
         { language: 'typescriptreact' },
         { language: 'javascriptreact' },
+        { language: 'html' },
       ],
       new A11yCodeActionProvider(),
       {
@@ -123,15 +123,27 @@ export function activate(context: vscode.ExtensionContext): void {
   // Register commands
   context.subscriptions.push(
     vscode.commands.registerCommand('a11y.showReport', async () => {
-      const doc = await resolveActiveDocument();
-      const fileUri = doc?.uri;
-      const choice = await vscode.window.showQuickPick(
-        [
-          { label: '$(file) Current File', description: 'Show issues for the active file', value: 'file' },
-          { label: '$(folder) Entire Workspace', description: 'Show issues across all files', value: 'workspace' },
-        ],
-        { placeHolder: 'Show accessibility report for…' },
-      );
+      // Use active text editor directly — avoid resolveActiveDocument's file picker
+      const activeEditor = vscode.window.activeTextEditor;
+      const supportedLangs = new Set(['typescriptreact', 'javascriptreact', 'html']);
+      const fileUri = activeEditor && supportedLangs.has(activeEditor.document.languageId)
+        ? activeEditor.document.uri
+        : undefined;
+
+      const items = [
+        ...(fileUri ? [{ label: '$(file) Current File', description: vscode.workspace.asRelativePath(fileUri), value: 'file' as const }] : []),
+        { label: '$(folder) Entire Workspace', description: 'Show issues across all files', value: 'workspace' as const },
+      ];
+
+      // If no component file is open, go straight to workspace report
+      if (items.length === 1) {
+        await A11yReportPanel.createOrShow(context);
+        return;
+      }
+
+      const choice = await vscode.window.showQuickPick(items, {
+        placeHolder: 'Show accessibility report for…',
+      });
       if (!choice) { return; }
       if (choice.value === 'file' && fileUri) {
         await A11yReportPanel.createOrShow(context, fileUri);
@@ -172,6 +184,12 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   context.subscriptions.push(
+    vscode.commands.registerCommand('a11y.openSettings', () => {
+      ConfigPanel.createOrShow();
+    }),
+  );
+
+  context.subscriptions.push(
     vscode.commands.registerCommand('a11y.generateTests', async () => {
       await generateA11yTests();
     }),
@@ -179,9 +197,22 @@ export function activate(context: vscode.ExtensionContext): void {
 
   context.subscriptions.push(
     vscode.commands.registerCommand('a11y.fixFile', async () => {
+      const provider = vscode.workspace.getConfiguration('a11y').get<string>('aiProvider', 'none');
+      if (provider === 'none') {
+        vscode.window.showWarningMessage('Accessify: No AI provider configured. Set one in Accessify Settings.');
+        return;
+      }
+      const apiKey = await getStoredApiKey();
+      if (!apiKey) {
+        const action = await vscode.window.showWarningMessage(
+          'Accessify: No API key configured.', 'Set API Key');
+        if (action === 'Set API Key') { vscode.commands.executeCommand('a11y.setApiKey'); }
+        return;
+      }
+
       const document = await resolveActiveDocument();
       if (!document) {
-        vscode.window.showWarningMessage('Accessify: No TSX or JSX file is open.');
+        vscode.window.showWarningMessage('Accessify: No TSX, JSX, or HTML file is open.');
         return;
       }
 
@@ -212,29 +243,39 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('a11y.reviewPR', async () => {
-      await reviewPullRequest(context);
-    }),
-  );
-
-  context.subscriptions.push(
-    vscode.commands.registerCommand('a11y.exportSarif', async () => {
-      await exportSarif();
-    }),
-  );
-
-  context.subscriptions.push(
-    vscode.commands.registerCommand('a11y.exportJson', async () => {
-      await exportJson();
+    vscode.commands.registerCommand('a11y.exportReport', async () => {
+      const format = await vscode.window.showQuickPick(
+        [
+          { label: 'SARIF', description: 'Static Analysis Results Interchange Format — for GitHub Code Scanning, Azure DevOps, SonarQube' },
+          { label: 'JSON', description: 'Lightweight JSON — for custom CI integrations and dashboards' },
+        ],
+        { placeHolder: 'Select export format', title: 'Accessify: Export Report' },
+      );
+      if (!format) { return; }
+      if (format.label === 'SARIF') { await exportSarif(); }
+      else { await exportJson(); }
     }),
   );
 
   context.subscriptions.push(
     vscode.commands.registerCommand('a11y.bulkAiFix', async () => {
+      const provider = vscode.workspace.getConfiguration('a11y').get<string>('aiProvider', 'none');
+      if (provider === 'none') {
+        vscode.window.showWarningMessage('Accessify: No AI provider configured. Set one in Accessify Settings.');
+        return;
+      }
+      const apiKey = await getStoredApiKey();
+      if (!apiKey) {
+        const action = await vscode.window.showWarningMessage(
+          'Accessify: No API key configured.', 'Set API Key');
+        if (action === 'Set API Key') { vscode.commands.executeCommand('a11y.setApiKey'); }
+        return;
+      }
+
       const excludePattern = '{**/node_modules/**,**/.env*,**/config/**,**/*.config.*,**/*.test.*,**/*.spec.*,**/__tests__/**,**/__mocks__/**,**/test/**,**/tests/**,**/*.stories.*,**/coverage/**,**/dist/**,**/build/**}';
-      const fileUris = await vscode.workspace.findFiles('**/*.{tsx,jsx}', excludePattern);
+      const fileUris = await vscode.workspace.findFiles('**/*.{tsx,jsx,html}', excludePattern);
       if (fileUris.length === 0) {
-        vscode.window.showInformationMessage('Accessify: No TSX/JSX files found in workspace.');
+        vscode.window.showInformationMessage('Accessify: No TSX/JSX/HTML files found in workspace.');
         return;
       }
 
@@ -255,20 +296,14 @@ export function activate(context: vscode.ExtensionContext): void {
           cancellable: true,
         },
         async (progress, token) => {
-          // Phase 1: Fast static scan to filter files with issues
+          // Phase 1: Fast parallel scan to filter files with issues
           progress.report({ message: 'Scanning files for issues…' });
-          const filesWithIssues: vscode.Uri[] = [];
-          for (const fileUri of eligibleUris) {
-            if (token.isCancellationRequested) { return; }
-            try {
-              const doc = await vscode.workspace.openTextDocument(fileUri);
-              const issues = scanForA11yIssues(doc.getText(), doc.fileName);
-              if (issues.length > 0) {
-                filesWithIssues.push(fileUri);
-                totalIssuesFound += issues.length;
-              }
-            } catch { /* skip unreadable files */ }
-          }
+          const { parallelFilterFilesWithIssues } = await import('./parallelScanner');
+          const { filesWithIssues, totalIssues: foundIssues } = await parallelFilterFilesWithIssues(
+            eligibleUris,
+            { token },
+          );
+          totalIssuesFound = foundIssues;
 
           if (filesWithIssues.length === 0) {
             return;
@@ -286,9 +321,16 @@ export function activate(context: vscode.ExtensionContext): void {
             const batch = filesWithIssues.slice(batchStart, batchStart + concurrency);
             const batchResults = await Promise.allSettled(
               batch.map(async (fileUri) => {
-                const document = await vscode.workspace.openTextDocument(fileUri);
-                const result = await getFullFileFix(document, { silent: true });
-                return { fileUri, result };
+                try {
+                  const document = await vscode.workspace.openTextDocument(fileUri);
+                  const result = await getFullFileFix(document, { silent: true });
+                  return { fileUri, result };
+                } catch (e) {
+                  const msg = e instanceof Error ? e.message : String(e);
+                  const rel = vscode.workspace.asRelativePath(fileUri);
+                  console.error(`[Accessify] AI fix failed for ${rel}: ${msg}`);
+                  return { fileUri, result: null as Awaited<ReturnType<typeof getFullFileFix>> };
+                }
               }),
             );
 

@@ -64,4 +64,38 @@ describe('focus-visible rule', () => {
     const issues = collectIssues('<button style={{ outlineWidth: 0, boxShadow: "0 0 0 2px blue" }}>click</button>', checkFocusVisible);
     assert.strictEqual(issues.length, 0);
   });
+
+  /* ── Tailwind / className-based checks ─────────────────────────────── */
+
+  it('flags className="outline-none" without alternative', () => {
+    const issues = collectIssues('<button className="outline-none">click</button>', checkFocusVisible);
+    assert.strictEqual(issues.length, 1);
+    assert.strictEqual(issues[0].rule, 'focus-visible');
+    assert.ok(issues[0].message.includes('outline-none'));
+  });
+
+  it('flags className="outline-0" without alternative', () => {
+    const issues = collectIssues('<div className="outline-0">text</div>', checkFocusVisible);
+    assert.strictEqual(issues.length, 1);
+  });
+
+  it('passes outline-none with ring-* alternative', () => {
+    const issues = collectIssues('<button className="outline-none ring-2 ring-blue-500">click</button>', checkFocusVisible);
+    assert.strictEqual(issues.length, 0);
+  });
+
+  it('passes outline-none with shadow-* alternative', () => {
+    const issues = collectIssues('<button className="outline-none shadow-md">click</button>', checkFocusVisible);
+    assert.strictEqual(issues.length, 0);
+  });
+
+  it('passes outline-none with border-* alternative', () => {
+    const issues = collectIssues('<button className="outline-none border-blue-500">click</button>', checkFocusVisible);
+    assert.strictEqual(issues.length, 0);
+  });
+
+  it('ignores className without outline removal', () => {
+    const issues = collectIssues('<button className="bg-blue-500 text-white">click</button>', checkFocusVisible);
+    assert.strictEqual(issues.length, 0);
+  });
 });

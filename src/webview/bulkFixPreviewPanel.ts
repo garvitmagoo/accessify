@@ -44,7 +44,7 @@ export class BulkFixPreviewPanel {
   }
 
   public static createOrShow(result: BulkFixResult): void {
-    const column = vscode.ViewColumn.Beside;
+    const column = vscode.ViewColumn.Two;
 
     if (BulkFixPreviewPanel.currentPanel) {
       BulkFixPreviewPanel.currentPanel.panel.dispose();
@@ -161,6 +161,7 @@ export class BulkFixPreviewPanel {
     for (const [fileIdx, changeIds] of groupedByFile) {
       const entry = this.result.files[fileIdx];
       const document = await vscode.workspace.openTextDocument(entry.uri);
+      const usedRanges: Array<{ start: number; end: number }> = [];
 
       const accepted = entry.changes
         .filter(c => changeIds.includes(c.id))
@@ -169,6 +170,13 @@ export class BulkFixPreviewPanel {
       for (const change of accepted) {
         const startLine = change.startLine - 1;
         const endLine = Math.min(change.endLine - 1, document.lineCount - 1);
+
+        // Skip changes that overlap with already-accepted ranges
+        if (usedRanges.some(r => startLine <= r.end && endLine >= r.start)) {
+          skippedDetails.push(`${entry.relativePath}:${change.startLine} [${change.rule}] — overlapping range`);
+          continue;
+        }
+
         const startPos = new vscode.Position(startLine, 0);
         const endPos = document.lineAt(endLine).range.end;
         const rangeToReplace = new vscode.Range(startPos, endPos);
@@ -181,6 +189,7 @@ export class BulkFixPreviewPanel {
         }
 
         edit.replace(entry.uri, rangeToReplace, change.replacement);
+        usedRanges.push({ start: startLine, end: endLine });
         appliedCount++;
       }
     }
@@ -570,8 +579,8 @@ export class BulkFixPreviewPanel {
     return `
     <div class="file-section" data-fi="${fileIdx}">
       <div class="file-header">
-        <input type="checkbox" class="file-checkbox" checked />
-        <span class="file-path" title="${esc(entry.relativePath)}" data-uri="${esc(entry.uri.toString())}">${esc(entry.relativePath)}</span>
+        <input type="checkbox" class="file-checkbox" id="file-cb-${fileIdx}" checked aria-label="Select all changes in ${esc(entry.relativePath)}" />
+        <label for="file-cb-${fileIdx}" class="file-path" title="${esc(entry.relativePath)}" data-uri="${esc(entry.uri.toString())}">${esc(entry.relativePath)}</label>
         <span class="file-count">${entry.changes.length} change(s)</span>
       </div>
       <div class="file-body">${cards}</div>
@@ -595,17 +604,18 @@ export class BulkFixPreviewPanel {
 
     // Sort folders alphabetically
     const sortedFolders = [...folderMap.keys()].sort();
-    return sortedFolders.map(folder => {
+    return sortedFolders.map((folder, folderIdx) => {
       const files = folderMap.get(folder)!;
       const totalChanges = files.reduce((sum, f) => sum + f.entry.changes.length, 0);
       const fileSections = files.map(f => this.buildFileSection(f.entry, f.fileIdx)).join('\n');
       const displayFolder = folder === '.' ? '(root)' : folder;
+      const folderId = `folder-cb-${folderIdx}`;
       return `
       <div class="folder-group">
         <div class="folder-header">
-          <input type="checkbox" class="folder-checkbox" checked />
-          <span class="folder-icon"></span>
-          <span class="folder-name">${esc(displayFolder)}</span>
+          <input type="checkbox" class="folder-checkbox" id="${folderId}" checked aria-label="Select all changes in ${esc(displayFolder)}" />
+          <label for="${folderId}"><span class="folder-icon"></span>
+          <span class="folder-name">${esc(displayFolder)}</span></label>
           <span class="folder-count">${files.length} file(s), ${totalChanges} change(s)</span>
         </div>
         <div class="folder-body">${fileSections}</div>
@@ -657,8 +667,8 @@ export class BulkFixPreviewPanel {
     return `
     <div class="change-card" data-key="${key}">
       <div class="change-header">
-        <input type="checkbox" class="checkbox change-checkbox" data-key="${key}" />
-        <strong>${esc(change.explanation)}</strong>
+        <input type="checkbox" class="checkbox change-checkbox" data-key="${key}" id="change-cb-${key}" aria-label="${esc(change.explanation)}" />
+        <label for="change-cb-${key}"><strong>${esc(change.explanation)}</strong></label>
         <span class="rule">${esc(change.rule)}</span>
         ${this.buildConfidenceBadge(change.confidence)}
         <span class="lines" data-uri="${esc(this.getFileUri(fileIdx))}" data-line="${change.startLine}">Lines ${change.startLine}\u2013${change.endLine}</span>

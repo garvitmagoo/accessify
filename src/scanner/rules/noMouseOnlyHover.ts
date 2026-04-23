@@ -1,11 +1,15 @@
 import * as ts from 'typescript';
 import type { A11yIssue } from '../../types';
+import { hasSpreadProps } from './jsxHelpers';
 
 /**
  * Rule: no-mouse-only-hover
  * WCAG 1.4.13 — Content that appears on hover must also be accessible via
  * keyboard focus. Elements with onMouseEnter/onMouseOver should have a
  * corresponding onFocus handler.
+ *
+ * Spread props: Suppressed when `{...props}` is present since event
+ * handlers may be provided dynamically.
  */
 export function checkNoMouseOnlyHover(node: ts.Node, sourceFile: ts.SourceFile): A11yIssue[] {
   const issues: A11yIssue[] = [];
@@ -13,6 +17,9 @@ export function checkNoMouseOnlyHover(node: ts.Node, sourceFile: ts.SourceFile):
   if (!ts.isJsxSelfClosingElement(node) && !ts.isJsxOpeningElement(node)) {
     return issues;
   }
+
+  // Spread props may include both mouse and focus handlers
+  if (hasSpreadProps(node)) { return issues; }
 
   const attrs = node.attributes.properties;
 

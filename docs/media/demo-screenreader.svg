@@ -1,0 +1,118 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 320" width="720" height="320" role="img" aria-label="Accessify screen reader preview announces each element in the source file">
+  <defs>
+    <style>
+      .bg { fill: #1e1e1e; }
+      .panel { fill: #252526; }
+      .code { font-family: Menlo, Consolas, monospace; font-size: 13px; }
+      .tag { fill: #569cd6; }
+      .attr { fill: #9cdcfe; }
+      .str { fill: #ce9178; }
+      .punct { fill: #d4d4d4; }
+      .text-content { fill: #d4d4d4; }
+      .sr-header { fill: #cccccc; font-family: -apple-system, Segoe UI, sans-serif; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
+      .ann-card { fill: #2d2d30; stroke: #3e3e42; }
+      .ann-text { fill: #e4e4e4; font-family: -apple-system, Segoe UI, sans-serif; font-size: 13px; }
+      .ann-role { fill: #9cdcfe; font-family: Menlo, monospace; font-size: 10px; }
+      .icon-wave { fill: #6fc3df; }
+
+      @keyframes card-in-1 { 0%, 10% { opacity: 0; transform: translateX(8px); } 22%, 100% { opacity: 1; transform: translateX(0); } }
+      @keyframes card-in-2 { 0%, 30% { opacity: 0; transform: translateX(8px); } 42%, 100% { opacity: 1; transform: translateX(0); } }
+      @keyframes card-in-3 { 0%, 50% { opacity: 0; transform: translateX(8px); } 62%, 100% { opacity: 1; transform: translateX(0); } }
+      @keyframes card-in-4 { 0%, 70% { opacity: 0; transform: translateX(8px); } 82%, 100% { opacity: 1; transform: translateX(0); } }
+      @keyframes pulse-1 { 0%, 15% { opacity: 0.4; } 20%, 25% { opacity: 1; } 30%, 100% { opacity: 0.4; } }
+      @keyframes pulse-2 { 0%, 35% { opacity: 0.4; } 40%, 45% { opacity: 1; } 50%, 100% { opacity: 0.4; } }
+      @keyframes pulse-3 { 0%, 55% { opacity: 0.4; } 60%, 65% { opacity: 1; } 70%, 100% { opacity: 0.4; } }
+      @keyframes pulse-4 { 0%, 75% { opacity: 0.4; } 80%, 85% { opacity: 1; } 90%, 100% { opacity: 0.4; } }
+
+      .card-1 { animation: card-in-1 5s infinite; }
+      .card-2 { animation: card-in-2 5s infinite; }
+      .card-3 { animation: card-in-3 5s infinite; }
+      .card-4 { animation: card-in-4 5s infinite; }
+      .wave-1 { animation: pulse-1 5s infinite; transform-origin: 392px 88px; }
+      .wave-2 { animation: pulse-2 5s infinite; transform-origin: 392px 136px; }
+      .wave-3 { animation: pulse-3 5s infinite; transform-origin: 392px 184px; }
+      .wave-4 { animation: pulse-4 5s infinite; transform-origin: 392px 232px; }
+    </style>
+  </defs>
+
+  <rect class="bg" width="720" height="320" rx="8"/>
+
+  <!-- Left: code editor -->
+  <rect x="0" y="0" width="360" height="320" fill="#1e1e1e" rx="8"/>
+  <rect x="0" y="0" width="360" height="32" fill="#2d2d30"/>
+  <text x="16" y="21" class="code" fill="#cccccc">Profile.tsx</text>
+
+  <g class="code">
+    <text x="16" y="68">
+      <tspan class="punct">&lt;</tspan><tspan class="tag">nav</tspan><tspan class="punct"> </tspan><tspan class="attr">aria-label</tspan><tspan class="punct">=</tspan><tspan class="str">"Primary"</tspan><tspan class="punct">&gt;</tspan>
+    </text>
+    <text x="32" y="92">
+      <tspan class="punct">&lt;</tspan><tspan class="tag">h1</tspan><tspan class="punct">&gt;</tspan><tspan class="text-content">Dashboard</tspan><tspan class="punct">&lt;/</tspan><tspan class="tag">h1</tspan><tspan class="punct">&gt;</tspan>
+    </text>
+    <text x="32" y="116">
+      <tspan class="punct">&lt;</tspan><tspan class="tag">img</tspan><tspan class="punct"> </tspan><tspan class="attr">src</tspan><tspan class="punct">=</tspan><tspan class="str">"/avatar.png"</tspan>
+    </text>
+    <text x="40" y="134">
+      <tspan class="punct"> </tspan><tspan class="attr">alt</tspan><tspan class="punct">=</tspan><tspan class="str">"Jane Doe"</tspan><tspan class="punct"> /&gt;</tspan>
+    </text>
+    <text x="32" y="158">
+      <tspan class="punct">&lt;</tspan><tspan class="tag">button</tspan><tspan class="punct">&gt;</tspan><tspan class="text-content">Sign out</tspan><tspan class="punct">&lt;/</tspan><tspan class="tag">button</tspan><tspan class="punct">&gt;</tspan>
+    </text>
+    <text x="16" y="182">
+      <tspan class="punct">&lt;/</tspan><tspan class="tag">nav</tspan><tspan class="punct">&gt;</tspan>
+    </text>
+  </g>
+
+  <!-- Right: Screen reader preview panel -->
+  <rect class="panel" x="360" y="0" width="360" height="320" rx="8"/>
+  <rect class="panel" x="360" y="0" width="8" height="320"/>
+
+  <text x="380" y="24" class="sr-header">🔊 Screen Reader Preview</text>
+  <line x1="380" y1="36" x2="700" y2="36" stroke="#3e3e42"/>
+
+  <!-- Announcement cards -->
+  <g class="card-1">
+    <rect class="ann-card" x="380" y="56" width="320" height="42" rx="4"/>
+    <g class="wave-1">
+      <circle cx="394" cy="78" r="6" class="icon-wave" opacity="0.3"/>
+      <path d="M 398 78 Q 402 74 402 78 Q 402 82 398 78" class="icon-wave"/>
+    </g>
+    <text x="408" y="76" class="ann-text">Primary navigation</text>
+    <text x="408" y="90" class="ann-role">nav · landmark</text>
+  </g>
+
+  <g class="card-2">
+    <rect class="ann-card" x="380" y="104" width="320" height="42" rx="4"/>
+    <g class="wave-2">
+      <circle cx="394" cy="126" r="6" class="icon-wave" opacity="0.3"/>
+      <path d="M 398 126 Q 402 122 402 126 Q 402 130 398 126" class="icon-wave"/>
+    </g>
+    <text x="408" y="124" class="ann-text">Dashboard, heading level 1</text>
+    <text x="408" y="138" class="ann-role">h1 · heading</text>
+  </g>
+
+  <g class="card-3">
+    <rect class="ann-card" x="380" y="152" width="320" height="42" rx="4"/>
+    <g class="wave-3">
+      <circle cx="394" cy="174" r="6" class="icon-wave" opacity="0.3"/>
+      <path d="M 398 174 Q 402 170 402 174 Q 402 178 398 174" class="icon-wave"/>
+    </g>
+    <text x="408" y="172" class="ann-text">Jane Doe, image</text>
+    <text x="408" y="186" class="ann-role">img · image</text>
+  </g>
+
+  <g class="card-4">
+    <rect class="ann-card" x="380" y="200" width="320" height="42" rx="4"/>
+    <g class="wave-4">
+      <circle cx="394" cy="222" r="6" class="icon-wave" opacity="0.3"/>
+      <path d="M 398 222 Q 402 218 402 222 Q 402 226 398 222" class="icon-wave"/>
+    </g>
+    <text x="408" y="220" class="ann-text">Sign out, button</text>
+    <text x="408" y="234" class="ann-role">button · interactive</text>
+  </g>
+
+  <!-- Footer hint -->
+  <text x="380" y="280" class="ann-role" fill="#888">5 elements · 0 issues</text>
+  <rect x="380" y="290" width="320" height="4" fill="#3e3e42" rx="2"/>
+  <rect x="380" y="290" width="320" height="4" fill="#3DDC84" rx="2"/>
+</svg>

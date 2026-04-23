@@ -131,4 +131,31 @@ describe('form-label rule', () => {
     const issues = collectIssues('<div>hello</div>', checkFormLabel);
     assert.strictEqual(issues.length, 0);
   });
+
+  /* ── Spread props ──────────────────────────────────────────────────── */
+
+  it('suppresses when spread props present (<input {...props} />)', () => {
+    const issues = collectIssues('<input {...props} />', checkFormLabel);
+    assert.strictEqual(issues.length, 0);
+  });
+
+  it('suppresses MUI input with spread props', () => {
+    const issues = collectIssues('<TextField {...props} />', checkFormLabel);
+    assert.strictEqual(issues.length, 0);
+  });
+
+  /* ── Empty label detection ──────────────────────────────────────────── */
+
+  it('flags <input aria-label="" />', () => {
+    const issues = collectIssues('<input aria-label="" />', checkFormLabel);
+    assert.strictEqual(issues.length, 1);
+    assert.strictEqual(issues[0].severity, 'error');
+    assert.ok(issues[0].message.includes('empty'));
+  });
+
+  it('flags <TextField label="" />', () => {
+    const issues = collectIssues('<TextField label="" />', checkFormLabel);
+    assert.strictEqual(issues.length, 1);
+    assert.strictEqual(issues[0].severity, 'error');
+  });
 });

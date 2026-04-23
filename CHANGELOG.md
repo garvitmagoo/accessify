@@ -1,6 +1,87 @@
 # Changelog
 
-## [1.0.0] - 2026-04-08
+## [1.1.0] - 2026-04-22
+
+### Added
+
+- **7 rules re-registered** (24 total): `anchor-is-valid`, `focus-visible`, `label-has-associated-control`, `media-has-caption`, `page-title`, `prefer-semantic-elements`, `skip-link`
+- **Activation on TypeScript/JavaScript** — Extension now activates on `typescript` and `javascript` files in addition to `typescriptreact`, `javascriptreact`, and `html`, matching the diagnostic scanner's `SUPPORTED_LANGUAGES`
+
+### Fixed
+
+- **Report panel keyboard accessibility** — Issue rows and collapsible file headers now have `role="button"`, `tabindex="0"`, `aria-label`, `aria-expanded`, `:focus-visible` outlines, and Enter/Space keyboard handlers
+- **Screen Reader panel tabs** — Tabs now use `aria-controls`, `aria-labelledby`, roving `tabindex`, and Arrow/Home/End key navigation per WAI-ARIA Tabs pattern
+- **Command bar menu** — Menu items now use `role="menuitem"` with roving tabindex; toggle button has `aria-haspopup`/`aria-expanded`; Escape closes menu and returns focus; Arrow Up/Down navigates items
+- **Diff/Bulk Fix checkbox labels** — All checkboxes (change, file, folder) now have `<label for=…>` and `aria-label` for screen reader access
+- **Severity badge contrast** — `.severity.error` text changed from white to black for ≥ 4.5:1 contrast ratio against the red background
+- **scanOnOpen/scanOnSave** — Listeners are now always registered; the config setting is read inside the handler so toggling takes effect immediately without reload
+- **Config panel rule list** — All 24 rules now appear in the Settings panel rule toggles (was missing the 7 re-registered rules)
+
+## [1.0.0] - 2026-04-21
+
+### Added
+
+- **HTML file support** — Scans `.html` files in addition to JSX/TSX
+- **Visual Settings panel** (`Accessify: Open Settings`) — Configure AI provider, rule toggles, exclude patterns, and performance via a dedicated UI instead of editing JSON
+- **Config-aware reports & exports** — Disabled rules and excluded files are now respected in the Accessibility Report and SARIF/JSON exports
+- **Tailwind color contrast suggestions** — Color-contrast diagnostics suggest accessible Tailwind replacement classes
+- **Merged export command** — Single `Accessify: Export Report` command with SARIF/JSON format picker
+- **Claude model auto-detection** — AI model defaults are inferred per-provider when left empty (Claude → claude-sonnet-4-20250514, OpenAI → gpt-4)
+- **API retry with backoff** — AI calls retry up to 2 times with exponential backoff (120s timeout), respecting `Retry-After` headers
+- **Crash boundary for bulk AI fix** — Individual file failures no longer abort the entire batch
+
+### Changed
+
+- **Status bar click** — Goes directly to file/workspace report picker without component-file dropdown
+- **Focused rule set** — Removed 7 flag-only rules that had no auto-fix; every remaining rule has a static or bulk fix (restored in v1.1.0)
+- **.a11yrc.json write safety** — All file writes are serialized through a queue to prevent corruption from concurrent toggles
+- **Enable/Disable All rules** — Sends a single batch operation instead of 17 individual writes
+- **editorUtils** — Tab resolution now includes `.html` files
+- Rule count updated to 17 across all documentation and metadata
+- VSIX no longer includes source maps (`**/*.map` excluded)
+
+### Removed
+
+- **`anchor-is-valid` rule** — Produced 7500+ false positives on typical codebases (restored in v1.1.0)
+- **6 flag-only rules**: `focus-visible`, `page-title`, `media-has-caption`, `prefer-semantic-elements`, `label-has-associated-control`, `skip-link` — these only flagged issues without providing fixes (restored in v1.1.0)
+
+### Fixed
+
+- **"Invalid .a11yrc.json" error** — Race condition when clicking Enable/Disable All in settings panel caused concurrent writes that corrupted the file
+- **Reports ignoring config** — Accessibility Report and exports now filter out disabled rules and excluded files
+
+## [Pre-release changes]
+
+### Added
+
+- **3 new rules** (24 total): `svg-has-accessible-name` (1.1.1), `label-has-associated-control` (1.3.1), `skip-link` (2.4.1)
+- **Disabled element exemption** — `color-contrast` rule now skips elements with `disabled`, `aria-disabled="true"`, or `aria-disabled={true}` per WCAG 1.4.3
+- **Dynamic expression support** — `button-label` and `svg-has-accessible-name` rules now recognize dynamic JSX expressions (e.g., `` aria-label={`More options for ${name}`} ``) as valid labels
+- **Duplicate attribute guard** — static fixes no longer insert attributes that already exist on the element
+- **Overlapping change detection** — AI fix preview panels detect and skip overlapping line ranges instead of failing the entire batch
+- **WCAG metadata** for all rules in axe integration, SARIF export, and report panel
+
+### Changed
+
+- All webview panels now open in the second editor column (`ViewColumn.Two`)
+- Static fix placeholders use descriptive TODO text (e.g., `aria-label="TODO: describe action"`) instead of empty strings
+- Rule count updated to 24 across all documentation and metadata
+
+### Removed
+
+- **6 low-value rules**: `no-positive-tabindex`, `no-access-key`, `no-redundant-roles`, `no-redundant-alt`, `table-has-header`, `prefers-reduced-motion`
+- **PR Review command** (`a11y.reviewPR`) and associated webview panel
+- **Compare with Last Commit** command (`a11y.compareWithLastCommit`)
+- **Scan Workspace command** — redundant with the Accessibility Report
+- Removed stale references to deleted rules from all metadata maps, test generators, and export modules
+
+### Fixed
+
+- **Workspace re-scan not reflecting fixes** — diagnostics are now cleared before re-scanning
+- **"Failed to apply changes" error** — overlapping AI fix ranges are detected and skipped
+- **False positive on dynamic aria-label** — template literals and JSX expressions no longer flagged as missing
+
+## [Earlier development]
 
 ### Added
 
@@ -32,7 +113,7 @@
 - **Path traversal fix** — PR review panel rejects `../` sequences in file paths
 - **Single-quote escaping** — `escapeHtml()` now escapes `'` to `&#x27;`
 
-## [0.4.0] - 2026-04-07
+## [0.4.0]
 
 ### Added
 
@@ -48,7 +129,7 @@
 - `img-alt` and `nextjs-image-alt` rules now use a shared factory (`createAltChecker`)
 - Confidence scoring wired end-to-end: static fixes use `getStaticFixRisk().confidence`, AI fixes use `validateFix().adjustedConfidence`
 
-## [0.3.0] - 2026-04-02
+## [0.3.0]
 
 ### Added
 
@@ -74,7 +155,7 @@
 
 - **Bulk Fix Entire Workspace** (static) — Replaced by the safer per-file static fix and workspace-wide AI bulk fix
 
-## [0.2.0] - 2026-03-20
+## [0.2.0]
 
 ### Added
 
@@ -90,7 +171,7 @@
 - Bulk fix in file goes directly to preview panel (no intermediate dropdown)
 - Git comparison is now cancellable with 10s timeout per file to prevent hangs
 
-## [0.1.0] - 2025-01-01
+## [0.1.0]
 
 ### Added
 

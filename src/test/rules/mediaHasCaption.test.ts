@@ -39,4 +39,16 @@ describe('media-has-caption rule', () => {
     const issues = collectIssues('<div>hello</div>', checkMediaHasCaption);
     assert.strictEqual(issues.length, 0);
   });
+
+  /* ── Spread props ──────────────────────────────────────────────────── */
+
+  it('suppresses when spread props present on video', () => {
+    const issues = collectIssues('<video {...videoProps} />', checkMediaHasCaption);
+    assert.strictEqual(issues.length, 0);
+  });
+
+  it('suppresses when spread props present on audio', () => {
+    const issues = collectIssues('<audio {...audioProps} />', checkMediaHasCaption);
+    assert.strictEqual(issues.length, 0);
+  });
 });

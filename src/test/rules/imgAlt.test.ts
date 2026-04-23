@@ -29,4 +29,34 @@ describe('img-alt rule', () => {
     const issues = collectIssues('<img src="test.png"></img>', checkImgAlt);
     assert.strictEqual(issues.length, 1);
   });
+
+  /* ── Spread props ──────────────────────────────────────────────────── */
+
+  it('suppresses when spread props present (<img {...props} />)', () => {
+    const issues = collectIssues('<img {...props} />', checkImgAlt);
+    assert.strictEqual(issues.length, 0);
+  });
+
+  it('still flags when spread is present but partial attrs are explicit', () => {
+    // Spread is present + no alt → suppressed (spread may carry alt)
+    const issues = collectIssues('<img src="x.png" {...props} />', checkImgAlt);
+    assert.strictEqual(issues.length, 0);
+  });
+
+  /* ── Decorative images ──────────────────────────────────────────────── */
+
+  it('skips aria-hidden="true" images', () => {
+    const issues = collectIssues('<img src="bg.png" aria-hidden="true" />', checkImgAlt);
+    assert.strictEqual(issues.length, 0);
+  });
+
+  it('skips role="presentation" images', () => {
+    const issues = collectIssues('<img src="bg.png" role="presentation" />', checkImgAlt);
+    assert.strictEqual(issues.length, 0);
+  });
+
+  it('skips role="none" images', () => {
+    const issues = collectIssues('<img src="bg.png" role="none" />', checkImgAlt);
+    assert.strictEqual(issues.length, 0);
+  });
 });

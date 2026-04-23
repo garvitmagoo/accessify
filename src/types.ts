@@ -53,31 +53,3 @@ export function toVscodeSeverity(severity: A11yIssue['severity']): vscode.Diagno
     case 'hint': return vscode.DiagnosticSeverity.Hint;
   }
 }
-
-/* ── PR Review types ────────────────────────────────────────────────────── */
-
-export interface PrFileResult {
-  /** Workspace-relative path */
-  file: string;
-  status: 'added' | 'modified' | 'renamed';
-  newIssues: A11yIssue[];
-  fixedIssues: A11yIssue[];
-  currentIssues: A11yIssue[];
-  previousIssues: A11yIssue[];
-}
-
-export interface PrReviewResult {
-  baseBranch: string;
-  currentBranch: string;
-  files: PrFileResult[];
-  totalNew: number;
-  totalFixed: number;
-  totalCurrent: number;
-  totalPrevious: number;
-  pass: boolean;
-  /** GitHub PR metadata — present when reviewing a GitHub PR */
-  prNumber?: number;
-  prTitle?: string;
-  prAuthor?: string;
-  prUrl?: string;
-}

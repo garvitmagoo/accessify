@@ -68,6 +68,33 @@ function findOpeningTagCloseMultiline(
   return null;
 }
 
+/**
+ * Extract the attribute name from an attribute string like `aria-label="value"`.
+ */
+function extractAttrName(attribute: string): string {
+  const match = attribute.match(/^([a-zA-Z][a-zA-Z0-9\-]*)/);
+  return match ? match[1] : attribute;
+}
+
+/**
+ * Check whether the JSX opening tag already contains an attribute with the
+ * given name.  Works for both single-line and multiline tags.
+ */
+function tagAlreadyHasAttribute(
+  document: vscode.TextDocument,
+  startLine: number,
+  tagStartCol: number,
+  attrName: string,
+): boolean {
+  const span = findJsxOpeningTagSpan(document, startLine, tagStartCol);
+  let tagText = '';
+  for (let i = span.startLine; i <= span.endLine; i++) {
+    tagText += document.lineAt(i).text + '\n';
+  }
+  const pattern = new RegExp(`(?:^|\\s)${escapeRegExp(attrName)}(?:=|\\s|/?>)`, 'm');
+  return pattern.test(tagText);
+}
+
 /** Find the span of the JSX opening tag (from `<Tag` to `>` or `/>`). */
 function findJsxOpeningTagSpan(
   document: vscode.TextDocument,
@@ -198,7 +225,7 @@ export class A11yCodeActionProvider implements vscode.CodeActionProvider {
         return this.createInsertAttributeFix(
           document,
           diagnostic,
-          inferredLabel ? `aria-label="${inferredLabel}"` : 'aria-label=""',
+          inferredLabel ? `aria-label="${inferredLabel}"` : 'aria-label="TODO: describe action"',
           inferredLabel ? `Add aria-label="${inferredLabel}"` : 'Add aria-label attribute',
         );
       }
@@ -207,7 +234,7 @@ export class A11yCodeActionProvider implements vscode.CodeActionProvider {
         return this.createInsertAttributeFix(
           document,
           diagnostic,
-          'aria-label=""',
+          'aria-label="TODO: describe input"',
           'Add aria-label attribute',
         );
       }
@@ -227,7 +254,7 @@ export class A11yCodeActionProvider implements vscode.CodeActionProvider {
           return this.createInsertAttributeFix(
             document,
             diagnostic,
-            'aria-label=""',
+            'aria-label="TODO: describe element"',
             'Add aria-label attribute',
           );
         }
@@ -301,11 +328,19 @@ export class A11yCodeActionProvider implements vscode.CodeActionProvider {
         const data = getDiagnosticData(document.uri, diagnostic);
         const fg = data?.foreground ?? diagnostic.message.match(/foreground: "([^"]+)"/)?.[1];
         const bg = data?.background ?? diagnostic.message.match(/background: "([^"]+)"/)?.[1];
-        if (fg && bg) {
-          const fixedFg = suggestAccessibleForeground(fg, bg);
-          if (fixedFg) {
-            return this.createReplaceColorFix(document, diagnostic, fg, fixedFg);
-          }
+        if (!fg || !bg) { return null; }
+
+        // Tailwind class-based fix
+        const fgClass = data?.fgClass;
+        const suggestedFgClass = data?.suggestedFgClass;
+        if (fgClass && suggestedFgClass) {
+          return this.createReplaceTailwindColorFix(document, diagnostic, fgClass, suggestedFgClass);
+        }
+
+        // Inline style fix
+        const fixedFg = suggestAccessibleForeground(fg, bg);
+        if (fixedFg) {
+          return this.createReplaceColorFix(document, diagnostic, fg, fixedFg);
         }
         return null;
       }
@@ -332,8 +367,44 @@ export class A11yCodeActionProvider implements vscode.CodeActionProvider {
         return this.createInsertAttributeFix(
           document,
           diagnostic,
-          'aria-label=""',
+          'aria-label="TODO: describe link"',
           'Add aria-label to Next.js Link',
+        );
+      }
+
+      case 'svg-has-accessible-name': {
+        return this.createInsertAttributeFix(
+          document,
+          diagnostic,
+          'aria-label="TODO: describe image"',
+          'Add aria-label to SVG',
+        );
+      }
+
+      case 'no-autofocus': {
+        return this.createRemoveAttributeFix(
+          document,
+          diagnostic,
+          'autoFocus',
+          'Remove autoFocus attribute',
+        );
+      }
+
+      case 'interactive-supports-focus': {
+        return this.createInsertAttributeFix(
+          document,
+          diagnostic,
+          'tabIndex={0}',
+          'Add tabIndex={0} for keyboard focus',
+        );
+      }
+
+      case 'no-noninteractive-element-interactions': {
+        return this.createInsertAttributesFix(
+          document,
+          diagnostic,
+          ['role="button"', 'tabIndex={0}'],
+          'Add role and tabIndex for interactivity',
         );
       }
 
@@ -347,7 +418,13 @@ export class A11yCodeActionProvider implements vscode.CodeActionProvider {
     diagnostic: vscode.Diagnostic,
     attribute: string,
     title: string,
-  ): vscode.CodeAction {
+  ): vscode.CodeAction | null {
+    const attrName = extractAttrName(attribute);
+    const tagStart = diagnostic.range.start.character;
+    if (tagAlreadyHasAttribute(document, diagnostic.range.start.line, tagStart, attrName)) {
+      return null;
+    }
+
     const fix = new vscode.CodeAction(
       `Accessify: ${title}`,
       vscode.CodeActionKind.QuickFix,
@@ -356,7 +433,6 @@ export class A11yCodeActionProvider implements vscode.CodeActionProvider {
 
     const line = document.lineAt(diagnostic.range.start.line);
     const lineText = line.text;
-    const tagStart = diagnostic.range.start.character;
     const insertIndex = findOpeningTagClose(lineText, tagStart);
 
     const edit = new vscode.WorkspaceEdit();
@@ -387,12 +463,43 @@ export class A11yCodeActionProvider implements vscode.CodeActionProvider {
     return fix;
   }
 
+  private createRemoveAttributeFix(
+    document: vscode.TextDocument,
+    diagnostic: vscode.Diagnostic,
+    attrName: string,
+    title: string,
+  ): vscode.CodeAction {
+    const fix = new vscode.CodeAction(
+      `Accessify: ${title}`,
+      vscode.CodeActionKind.QuickFix,
+    );
+    fix.diagnostics = [diagnostic];
+    const edit = new vscode.WorkspaceEdit();
+    const line = diagnostic.range.start.line;
+    const lineText = document.lineAt(line).text;
+    const pattern = new RegExp(`\\s*${escapeRegExp(attrName)}(?:=\\{[^}]*\\}|="[^"]*"|='[^']*')?`);
+    const replaced = lineText.replace(pattern, '');
+    if (replaced !== lineText) {
+      const range = new vscode.Range(line, 0, line, lineText.length);
+      edit.replace(document.uri, range, replaced);
+      fix.edit = edit;
+    }
+    fix.isPreferred = true;
+    return fix;
+  }
+
   private createInsertAttributesFix(
     document: vscode.TextDocument,
     diagnostic: vscode.Diagnostic,
     attributes: string[],
     title: string,
-  ): vscode.CodeAction {
+  ): vscode.CodeAction | null {
+    const tagStart = diagnostic.range.start.character;
+    const missing = attributes.filter(
+      attr => !tagAlreadyHasAttribute(document, diagnostic.range.start.line, tagStart, extractAttrName(attr)),
+    );
+    if (missing.length === 0) { return null; }
+
     const fix = new vscode.CodeAction(
       `Accessify: ${title}`,
       vscode.CodeActionKind.QuickFix,
@@ -401,13 +508,12 @@ export class A11yCodeActionProvider implements vscode.CodeActionProvider {
 
     const line = document.lineAt(diagnostic.range.start.line);
     const lineText = line.text;
-    const tagStart = diagnostic.range.start.character;
     const insertIndex = findOpeningTagClose(lineText, tagStart);
 
     const edit = new vscode.WorkspaceEdit();
     if (insertIndex !== -1) {
       const insertPosition = new vscode.Position(diagnostic.range.start.line, insertIndex);
-      edit.insert(document.uri, insertPosition, ` ${attributes.join(' ')}`);
+      edit.insert(document.uri, insertPosition, ` ${missing.join(' ')}`);
       fix.edit = edit;
     } else {
       const multiline = findOpeningTagCloseMultiline(document, diagnostic.range.start.line, tagStart);
@@ -417,11 +523,11 @@ export class A11yCodeActionProvider implements vscode.CodeActionProvider {
         if (beforeClose === '' || beforeClose === '/') {
           const propIndent = detectPropIndentation(document, diagnostic.range.start.line, multiline.line);
           const insertPosition = new vscode.Position(multiline.line, 0);
-          const attrText = attributes.map(a => `${propIndent}${a}\n`).join('');
+          const attrText = missing.map(a => `${propIndent}${a}\n`).join('');
           edit.insert(document.uri, insertPosition, attrText);
         } else {
           const insertPosition = new vscode.Position(multiline.line, multiline.column);
-          edit.insert(document.uri, insertPosition, ` ${attributes.join(' ')}`);
+          edit.insert(document.uri, insertPosition, ` ${missing.join(' ')}`);
         }
         fix.edit = edit;
       }
@@ -539,6 +645,38 @@ export class A11yCodeActionProvider implements vscode.CodeActionProvider {
       const range = new vscode.Range(lineNum, valueStart, lineNum, valueStart + originalColor.length);
       edit.replace(document.uri, range, fixedColor);
     }
+    fix.edit = edit;
+    fix.isPreferred = true;
+    return fix;
+  }
+
+  private createReplaceTailwindColorFix(
+    document: vscode.TextDocument,
+    diagnostic: vscode.Diagnostic,
+    originalClass: string,
+    suggestedClass: string,
+  ): vscode.CodeAction {
+    const fix = new vscode.CodeAction(
+      `Accessify: Replace "${originalClass}" with "${suggestedClass}" for contrast`,
+      vscode.CodeActionKind.QuickFix,
+    );
+    fix.diagnostics = [diagnostic];
+
+    const edit = new vscode.WorkspaceEdit();
+    const lineNum = diagnostic.range.start.line;
+    const tagSpan = findJsxOpeningTagSpan(document, lineNum, diagnostic.range.start.character);
+
+    // Search the tag span for the Tailwind class
+    for (let i = tagSpan.startLine; i <= tagSpan.endLine; i++) {
+      const lineText = document.lineAt(i).text;
+      const idx = lineText.indexOf(originalClass);
+      if (idx !== -1) {
+        const range = new vscode.Range(i, idx, i, idx + originalClass.length);
+        edit.replace(document.uri, range, suggestedClass);
+        break;
+      }
+    }
+
     fix.edit = edit;
     fix.isPreferred = true;
     return fix;
@@ -668,7 +806,7 @@ export async function applyAiFixCommand(uri: vscode.Uri, diagnostic: vscode.Diag
 export async function bulkFixFileCommand(): Promise<void> {
   const document = await resolveActiveDocument();
   if (!document) {
-    vscode.window.showWarningMessage('Accessify: No TSX or JSX file is open.');
+    vscode.window.showWarningMessage('Accessify: No TSX, JSX, or HTML file is open.');
     return;
   }
 
@@ -692,9 +830,9 @@ export async function bulkFixFileCommand(): Promise<void> {
 
 export async function bulkFixWorkspaceCommand(): Promise<void> {
   const excludePattern = '{**/node_modules/**,**/.env*,**/config/**,/**/*.config.*,**/*.test.*,**/*.spec.*,**/__tests__/**,**/__mocks__/**,**/test/**,**/tests/**,**/*.stories.*,**/coverage/**,**/dist/**,**/build/**}';
-  const fileUris = await vscode.workspace.findFiles('**/*.{tsx,jsx}', excludePattern);
+  const fileUris = await vscode.workspace.findFiles('**/*.{tsx,jsx,html}', excludePattern);
   if (fileUris.length === 0) {
-    vscode.window.showInformationMessage('Accessify: No TSX/JSX files found in workspace.');
+    vscode.window.showInformationMessage('Accessify: No TSX/JSX/HTML files found in workspace.');
     return;
   }
 
@@ -807,6 +945,12 @@ function buildChangesForFile(
     const attribute = getStaticFixAttribute(rule, diagnostic);
     if (attribute) {
       const tagStart = diagnostic.range.start.character;
+
+      const attrName = extractAttrName(attribute);
+      if (tagAlreadyHasAttribute(document, lineNum, tagStart, attrName)) {
+        continue;
+      }
+
       const insertIndex = findOpeningTagClose(lineText, tagStart);
 
       const riskContext = rule === 'aria-pattern' ? diagnostic.message : undefined;
@@ -882,20 +1026,23 @@ function buildChangesForFile(
 function getStaticFixAttribute(ruleId: string, diagnostic: vscode.Diagnostic): string | null {
   switch (ruleId) {
     case 'img-alt': return 'alt=""';
-    case 'button-label': return 'aria-label=""';
-    case 'form-label': return 'aria-label=""';
+    case 'button-label': return 'aria-label="TODO: describe action"';
+    case 'form-label': return 'aria-label="TODO: describe input"';
     case 'click-events-have-key-events':
       return 'role="button" tabIndex={0} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { /* handler */ } }}';
     case 'nextjs-image-alt': return 'alt=""';
     case 'nextjs-head-lang': return 'lang="en"';
-    case 'nextjs-link-text': return 'aria-label=""';
+    case 'nextjs-link-text': return 'aria-label="TODO: describe link"';
     case 'autocomplete-valid': return 'autoComplete="name"';
     case 'no-mouse-only-hover': return 'onFocus={() => {}}';
+    case 'svg-has-accessible-name': return 'aria-label="TODO: describe image"';
+    case 'interactive-supports-focus': return 'tabIndex={0}';
+    case 'no-noninteractive-element-interactions': return 'role="button" tabIndex={0}';
     case 'aria-pattern': {
       const msg = diagnostic.message;
-      if (msg.includes('aria-labelledby') || msg.includes('aria-label')) { return 'aria-label=""'; }
+      if (msg.includes('aria-labelledby') || msg.includes('aria-label')) { return 'aria-label="TODO: describe element"'; }
       if (msg.includes('aria-expanded')) { return 'aria-expanded={false}'; }
-      if (msg.includes('aria-controls') || msg.includes('aria-selected')) { return 'aria-controls="" aria-selected={false}'; }
+      if (msg.includes('aria-controls') || msg.includes('aria-selected')) { return 'aria-controls="TODO: target-id" aria-selected={false}'; }
       return null;
     }
     default: return null;
@@ -960,17 +1107,34 @@ function getStaticFixReplacement(
     case 'color-contrast': {
       const fgMatch = diagnostic.message.match(/foreground: "([^"]+)"/);
       const bgMatch = diagnostic.message.match(/background: "([^"]+)"/);
-      if (fgMatch && bgMatch) {
-        const fixedFg = suggestAccessibleForeground(fgMatch[1], bgMatch[1]);
-        if (fixedFg) {
-          const colorPattern = new RegExp(
-            `(color:\\s*["'])${escapeRegExp(fgMatch[1])}(["'])`, 'i',
-          );
-          const replacement = lineText.replace(colorPattern, `$1${fixedFg}$2`);
-          if (replacement !== lineText) {
-            return { replacement, explanation: `Adjust foreground color to "${fixedFg}" for sufficient contrast` };
-          }
+      if (!fgMatch || !bgMatch) { return null; }
+
+      // Try Tailwind class replacement first
+      const twClassMatch = diagnostic.message.match(/replace "([^"]+)" with "([^"]+)"/);
+      if (twClassMatch) {
+        const replacement = lineText.replace(twClassMatch[1], twClassMatch[2]);
+        if (replacement !== lineText) {
+          return { replacement, explanation: `Replace "${twClassMatch[1]}" with "${twClassMatch[2]}" for sufficient contrast` };
         }
+      }
+
+      // Inline style fix
+      const fixedFg = suggestAccessibleForeground(fgMatch[1], bgMatch[1]);
+      if (fixedFg) {
+        const colorPattern = new RegExp(
+          `(color:\\s*["'])${escapeRegExp(fgMatch[1])}(["'])`, 'i',
+        );
+        const replacement = lineText.replace(colorPattern, `$1${fixedFg}$2`);
+        if (replacement !== lineText) {
+          return { replacement, explanation: `Adjust foreground color to "${fixedFg}" for sufficient contrast` };
+        }
+      }
+      return null;
+    }
+    case 'no-autofocus': {
+      const replacement = lineText.replace(/\s*autoFocus(?:=\{[^}]*\}|="[^"]*"|='[^']*')?/, '');
+      if (replacement !== lineText) {
+        return { replacement, explanation: 'Remove autoFocus attribute' };
       }
       return null;
     }

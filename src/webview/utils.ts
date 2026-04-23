@@ -24,11 +24,10 @@ const A11Y_COMMANDS = [
   { id: 'a11y.bulkFixWorkspace', label: 'Static Fix Workspace', icon: '\u{1F6E0}' },
   { id: 'a11y.fixFile', label: 'AI Fix File', icon: '\u{2728}' },
   { id: 'a11y.bulkAiFix', label: 'AI Fix Workspace', icon: '\u{1F916}' },
-  { id: 'a11y.generateTests', label: 'Generate Tests', icon: '\u{1F9EA}' },
-  { id: 'a11y.reviewPR', label: 'Review PR', icon: '\u{1F4DD}' },
-  { id: 'a11y.exportSarif', label: 'Export SARIF', icon: '\u{1F4E4}' },
-  { id: 'a11y.exportJson', label: 'Export JSON', icon: '\u{1F4E4}' },
+  { id: 'a11y.generateTests', label: 'Generate A11y Tests', icon: '\u{1F9EA}' },
+  { id: 'a11y.exportReport', label: 'Export Report', icon: '\u{1F4E4}' },
   { id: 'a11y.setApiKey', label: 'Set AI API Key', icon: '\u{1F511}' },
+  { id: 'a11y.openSettings', label: 'Settings', icon: '\u{2699}' },
 ];
 
 /** Set of allowed command IDs for webview message validation. */
@@ -68,23 +67,23 @@ export function getCommandBarCss(): string {
 export function getCommandBarHtml(): string {
   // Insert a separator after the first 3 items (scan/report/preview) and after fix commands
   const scanItems = A11Y_COMMANDS.slice(0, 3).map(c =>
-    `<button class="cmd-bar-item" data-cmd="${c.id}" title="${c.label}"><span>${c.icon}</span> ${c.label}</button>`
+    `<button class="cmd-bar-item" role="menuitem" data-cmd="${c.id}" title="${c.label}" tabindex="-1"><span>${c.icon}</span> ${c.label}</button>`
   ).join('\n');
   const fixItems = A11Y_COMMANDS.slice(3, 7).map(c =>
-    `<button class="cmd-bar-item" data-cmd="${c.id}" title="${c.label}"><span>${c.icon}</span> ${c.label}</button>`
+    `<button class="cmd-bar-item" role="menuitem" data-cmd="${c.id}" title="${c.label}" tabindex="-1"><span>${c.icon}</span> ${c.label}</button>`
   ).join('\n');
   const otherItems = A11Y_COMMANDS.slice(7).map(c =>
-    `<button class="cmd-bar-item" data-cmd="${c.id}" title="${c.label}"><span>${c.icon}</span> ${c.label}</button>`
+    `<button class="cmd-bar-item" role="menuitem" data-cmd="${c.id}" title="${c.label}" tabindex="-1"><span>${c.icon}</span> ${c.label}</button>`
   ).join('\n');
 
   return `
   <div class="cmd-bar">
-    <button class="cmd-bar-toggle" title="A11y Commands">Commands</button>
-    <div class="cmd-bar-menu" role="menu">
+    <button class="cmd-bar-toggle" title="A11y Commands" aria-haspopup="true" aria-expanded="false">Commands</button>
+    <div class="cmd-bar-menu" role="menu" aria-label="Accessify Commands">
       ${scanItems}
-      <div class="cmd-bar-sep"></div>
+      <div class="cmd-bar-sep" role="separator"></div>
       ${fixItems}
-      <div class="cmd-bar-sep"></div>
+      <div class="cmd-bar-sep" role="separator"></div>
       ${otherItems}
     </div>
   </div>`;
@@ -97,12 +96,38 @@ export function getCommandBarJs(): string {
       const toggle = document.querySelector('.cmd-bar-toggle');
       const menu = document.querySelector('.cmd-bar-menu');
       if (!toggle || !menu) return;
-      toggle.addEventListener('click', (e) => { e.stopPropagation(); menu.classList.toggle('open'); });
-      document.addEventListener('click', () => menu.classList.remove('open'));
+      const items = Array.from(menu.querySelectorAll('.cmd-bar-item'));
+
+      function openMenu() {
+        menu.classList.add('open');
+        toggle.setAttribute('aria-expanded', 'true');
+        if (items.length > 0) { items[0].setAttribute('tabindex', '0'); items[0].focus(); }
+      }
+
+      function closeMenu() {
+        menu.classList.remove('open');
+        toggle.setAttribute('aria-expanded', 'false');
+        items.forEach(i => i.setAttribute('tabindex', '-1'));
+        toggle.focus();
+      }
+
+      toggle.addEventListener('click', (e) => { e.stopPropagation(); if (menu.classList.contains('open')) closeMenu(); else openMenu(); });
+      document.addEventListener('click', () => { if (menu.classList.contains('open')) closeMenu(); });
       menu.addEventListener('click', (e) => e.stopPropagation());
-      menu.querySelectorAll('.cmd-bar-item').forEach(btn => {
+
+      menu.addEventListener('keydown', (e) => {
+        const idx = items.indexOf(document.activeElement);
+        if (e.key === 'Escape') { e.preventDefault(); closeMenu(); }
+        else if (e.key === 'ArrowDown') { e.preventDefault(); const next = (idx + 1) % items.length; items.forEach(i => i.setAttribute('tabindex', '-1')); items[next].setAttribute('tabindex', '0'); items[next].focus(); }
+        else if (e.key === 'ArrowUp') { e.preventDefault(); const prev = (idx - 1 + items.length) % items.length; items.forEach(i => i.setAttribute('tabindex', '-1')); items[prev].setAttribute('tabindex', '0'); items[prev].focus(); }
+        else if (e.key === 'Home') { e.preventDefault(); items.forEach(i => i.setAttribute('tabindex', '-1')); items[0].setAttribute('tabindex', '0'); items[0].focus(); }
+        else if (e.key === 'End') { e.preventDefault(); items.forEach(i => i.setAttribute('tabindex', '-1')); items[items.length - 1].setAttribute('tabindex', '0'); items[items.length - 1].focus(); }
+        else if (e.key === 'Tab') { closeMenu(); }
+      });
+
+      items.forEach(btn => {
         btn.addEventListener('click', () => {
-          menu.classList.remove('open');
+          closeMenu();
           vscode.postMessage({ type: 'runCommand', command: btn.dataset.cmd });
         });
       });

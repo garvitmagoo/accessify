@@ -30,7 +30,7 @@ describe('astScanner integration', () => {
         return (
           <div>
             <h1>Welcome</h1>
-            <img src="logo.png" alt="Logo" />
+            <img src="logo.png" alt="Acme Corp" />
             <button aria-label="Close">X</button>
             <input aria-label="Name" />
           </div>

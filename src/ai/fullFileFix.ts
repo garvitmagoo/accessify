@@ -5,7 +5,7 @@ import { validateFix } from '../scanner/axeIntegration';
 import { validateJsxSyntax } from '../scanner/jsxValidator';
 import { loadConfig, isAiExcluded } from '../config';
 import { applyActions, findOpeningTagClose } from '../jsx/utils';
-import { callAiProvider } from './caller';
+import { callAiProvider, resolveModelDefault } from './caller';
 import type { AiFixAction } from '../types';
 
 let _outputChannel: vscode.OutputChannel | undefined;
@@ -203,7 +203,7 @@ export async function getFullFileFix(document: vscode.TextDocument, options?: Fu
 
   const apiKey = await getApiKey(config);
   if (!apiKey) { return null; }
-  const model = config.get<string>('aiModel', 'gpt-4');
+  const model = resolveModelDefault(config.get<string>('aiModel', ''), provider);
 
   const changes = await fetchAndValidateChanges(
     sourceCode, fileName, issues, designSystem,

@@ -5,18 +5,23 @@
 
 import * as ts from 'typescript';
 import type { A11yIssue } from '../../types';
+import { hasSpreadProps, isAriaHidden, hasAttr } from './jsxHelpers';
 
 export interface AltCheckConfig {
-  /** Tag name to match (e.g. 'img', 'Image') */
   tagName: string;
-  /** Rule ID (e.g. 'img-alt', 'nextjs-image-alt') */
   ruleId: string;
-  /** Error message when alt is missing */
   message: string;
 }
 
 /**
  * Creates a rule checker that flags JSX elements missing an `alt` attribute.
+ *
+ * Handles:
+ *  - Spread props (`{...props}`) — suppresses the warning since alt may be
+ *    passed dynamically.
+ *  - Decorative images — `aria-hidden="true"`, `role="presentation"`, and
+ *    `role="none"` exempt the element from needing alt text.
+ *  - `alt=""` is considered valid (marks a decorative/redundant image per WCAG).
  */
 export function createAltChecker(config: AltCheckConfig) {
   return (node: ts.Node, sourceFile: ts.SourceFile): A11yIssue[] => {
@@ -29,11 +34,19 @@ export function createAltChecker(config: AltCheckConfig) {
       return [];
     }
 
-    const hasAlt = node.attributes.properties.some(
-      attr => ts.isJsxAttribute(attr) && attr.name.getText(sourceFile) === 'alt'
-    );
+    // Decorative / hidden images don't need alt text
+    if (isAriaHidden(node, sourceFile)) {
+      return [];
+    }
 
+    // alt="" is valid for decorative images (WCAG H67)
+    const hasAlt = hasAttr(node, 'alt', sourceFile);
     if (hasAlt) {
+      return [];
+    }
+
+    // Spread props may carry `alt` dynamically — suppress to avoid false positive
+    if (hasSpreadProps(node)) {
       return [];
     }
 

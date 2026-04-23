@@ -30,20 +30,15 @@ const RULE_MAP: Record<string, string> = {
   'heading-order': 'heading-order',
   'color-contrast': 'color-contrast',
   'click-events-have-key-events': 'click-events-have-key-events',
-  'no-positive-tabindex': 'tabindex',
   'autocomplete-valid': 'autocomplete-valid',
-  'focus-visible': 'focus-visible',
   'no-mouse-only-hover': 'no-mouse-only-hover',
   'nextjs-image-alt': 'image-alt',
   'nextjs-link-text': 'link-name',
   'nextjs-head-lang': 'html-has-lang',
-  'page-title': 'document-title',
-  'anchor-is-valid': 'link-name',
-  'no-redundant-roles': 'aria-allowed-role',
   'no-autofocus': 'no-autofocus',
   'interactive-supports-focus': 'interactive-supports-focus',
-  'media-has-caption': 'video-caption',
-  'no-access-key': 'accesskeys',
+  'no-noninteractive-element-interactions': 'no-noninteractive-element-interactions',
+  'svg-has-accessible-name': 'svg-img-alt',
 };
 
 /** Impact → base confidence modifier. Higher impact = more confident the fix is important. */
@@ -165,15 +160,6 @@ const STATIC_FIX_RISKS: Record<string, StaticFixRisk | ((ctx?: string) => Static
     reasoning: 'Adds an empty onFocus handler to pair with the mouse hover event (WCAG 2.1.1). The handler is a no-op placeholder and must be wired to show the same content as the hover.',
     caveat: 'The onFocus handler is empty — implement it to mirror the onMouseEnter/onMouseOver behavior.',
   },
-  'anchor-is-valid': {
-    confidence: 75,
-    reasoning: 'Replaces `<a href="#">` with a `<button>` element (WCAG 2.4.4). If this element truly navigates, use a real URL instead.',
-    caveat: 'Verify whether this element is an action (→ button) or navigation (→ real href).',
-  },
-  'no-redundant-roles': {
-    confidence: 95,
-    reasoning: 'Removes a redundant ARIA role that matches the element\'s implicit semantics. Safe to remove.',
-  },
   'no-autofocus': {
     confidence: 70,
     reasoning: 'Removes autoFocus attribute (WCAG 3.2.1). Focus management should be done programmatically if needed.',
@@ -184,14 +170,15 @@ const STATIC_FIX_RISKS: Record<string, StaticFixRisk | ((ctx?: string) => Static
     reasoning: 'Adds tabIndex={0} to make the element focusable (WCAG 2.1.1). Consider using a native interactive element (<button>) instead.',
     caveat: 'Adding tabIndex makes it focusable but doesn\'t add role semantics. A <button> may be more appropriate.',
   },
-  'media-has-caption': {
-    confidence: 50,
-    reasoning: 'Adds a placeholder <track kind="captions"> element (WCAG 1.2.2). The src must point to a real caption file.',
-    caveat: 'The track src is empty — provide a WebVTT (.vtt) caption file.',
+  'no-noninteractive-element-interactions': {
+    confidence: 65,
+    reasoning: 'Adds role="button" and tabIndex={0} to make the element interactive (WCAG 4.1.2). Consider using a native <button> instead.',
+    caveat: 'A native interactive element is always preferred over ARIA roles.',
   },
-  'no-access-key': {
-    confidence: 90,
-    reasoning: 'Removes accessKey attribute. Access keys conflict with assistive technology shortcuts and are not discoverable.',
+  'svg-has-accessible-name': {
+    confidence: 60,
+    reasoning: 'Adds aria-label placeholder to SVG element (WCAG 1.1.1). For decorative SVGs, use aria-hidden="true" instead.',
+    caveat: 'Replace the TODO placeholder with a meaningful description of the SVG content.',
   },
 };
 

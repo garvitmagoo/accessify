@@ -44,7 +44,7 @@ export class DiffPreviewPanel {
     documentUri: vscode.Uri,
     result: FullFileFixResult,
   ): void {
-    const column = vscode.ViewColumn.Beside;
+    const column = vscode.ViewColumn.Two;
 
     if (DiffPreviewPanel.currentPanel) {
       DiffPreviewPanel.currentPanel.panel.dispose();
@@ -99,10 +99,17 @@ export class DiffPreviewPanel {
     const edit = new vscode.WorkspaceEdit();
     let appliedCount = 0;
     let skippedCount = 0;
+    const usedRanges: Array<{ start: number; end: number }> = [];
 
     for (const change of accepted) {
       const startLine = change.startLine - 1; // 0-based
       const endLine = Math.min(change.endLine - 1, document.lineCount - 1);
+
+      // Skip changes that overlap with already-accepted ranges
+      if (usedRanges.some(r => startLine <= r.end && endLine >= r.start)) {
+        skippedCount++;
+        continue;
+      }
 
       const startPos = new vscode.Position(startLine, 0);
       const endPos = document.lineAt(endLine).range.end;
@@ -116,6 +123,7 @@ export class DiffPreviewPanel {
       }
 
       edit.replace(this.documentUri, rangeToReplace, change.replacement);
+      usedRanges.push({ start: startLine, end: endLine });
       appliedCount++;
     }
 
@@ -359,8 +367,8 @@ export class DiffPreviewPanel {
     return `
     <div class="change-card" data-id="${change.id}">
       <div class="change-header">
-        <input type="checkbox" class="checkbox change-checkbox" data-id="${change.id}" checked />
-        <strong>${esc(change.explanation)}</strong>
+        <input type="checkbox" class="checkbox change-checkbox" data-id="${change.id}" id="change-cb-${change.id}" checked aria-label="${esc(change.explanation)}" />
+        <label for="change-cb-${change.id}"><strong>${esc(change.explanation)}</strong></label>
         <span class="rule">${esc(change.rule)}</span>        ${this.buildConfidenceBadge(change.confidence)}        <span class="lines">Lines ${change.startLine}–${change.endLine}</span>
       </div>
       ${axeHtml}

@@ -1,19 +1,19 @@
 {
   "name": "accessify",
   "displayName": "Accessify",
-  "description": "AI-powered accessibility scanner for React/JSX/TSX projects. Detects WCAG violations, previews screen reader output, generates a11y tests, and provides intelligent fix suggestions.",
-  "version": "1.0.0",
+  "description": "Catch WCAG 2.1 AA violations in React/JSX/TSX/HTML as you type. 24 rules with auto-fixes, AI-powered fixes (OpenAI, Azure, Claude), and screen reader preview.",
+  "version": "1.1.1",
   "publisher": "garvit-magoo",
   "license": "MIT",
   "icon": "icon.png",
   "repository": {
     "type": "git",
-    "url": "https://github.com/garvit-magoo/a11y-scanner-extension"
+    "url": "https://github.com/garvit-magoo/accessify"
   },
   "bugs": {
-    "url": "https://github.com/garvit-magoo/a11y-scanner-extension/issues"
+    "url": "https://github.com/garvit-magoo/accessify/issues"
   },
-  "homepage": "https://github.com/garvit-magoo/a11y-scanner-extension#readme",
+  "homepage": "https://github.com/garvit-magoo/accessify#readme",
   "keywords": [
     "accessibility",
     "a11y",
@@ -21,9 +21,11 @@
     "react",
     "jsx",
     "tsx",
+    "html",
     "screen-reader",
     "aria",
-    "linter"
+    "linter",
+    "nextjs"
   ],
   "galleryBanner": {
     "color": "#0078D4",
@@ -35,11 +37,14 @@
   "categories": [
     "Linters",
     "Testing",
-    "Other"
+    "Programming Languages"
   ],
   "activationEvents": [
     "onLanguage:typescriptreact",
-    "onLanguage:javascriptreact"
+    "onLanguage:javascriptreact",
+    "onLanguage:typescript",
+    "onLanguage:javascript",
+    "onLanguage:html"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -58,19 +63,11 @@
       },
       {
         "command": "a11y.generateTests",
-        "title": "Accessify: Generate Accessibility Tests"
+        "title": "Accessify: Generate A11y Unit Tests"
       },
       {
-        "command": "a11y.reviewPR",
-        "title": "Accessify: Review PR / Compare Changes"
-      },
-      {
-        "command": "a11y.exportSarif",
-        "title": "Accessify: Export SARIF Report"
-      },
-      {
-        "command": "a11y.exportJson",
-        "title": "Accessify: Export JSON Report"
+        "command": "a11y.exportReport",
+        "title": "Accessify: Export Report"
       },
       {
         "command": "a11y.fixFile",
@@ -87,6 +84,10 @@
       {
         "command": "a11y.bulkAiFix",
         "title": "Accessify: Bulk AI Fix Workspace"
+      },
+      {
+        "command": "a11y.openSettings",
+        "title": "Accessify: Open Settings"
       }
     ],
     "keybindings": [
@@ -135,8 +136,8 @@
         },
         "a11y.aiModel": {
           "type": "string",
-          "default": "gpt-4",
-          "description": "Model/deployment name to use for AI suggestions."
+          "default": "",
+          "description": "Model/deployment name to use for AI suggestions. Leave empty for provider default (OpenAI: gpt-4, Claude: claude-sonnet-4-20250514)."
         },
         "a11y.aiBatchConcurrency": {
           "type": "integer",
@@ -144,6 +145,13 @@
           "minimum": 1,
           "maximum": 10,
           "description": "Number of files to process in parallel during bulk AI fix. Higher values are faster but use more API quota."
+        },
+        "a11y.scanConcurrency": {
+          "type": "integer",
+          "default": 8,
+          "minimum": 1,
+          "maximum": 32,
+          "description": "Number of files to scan in parallel during workspace-wide operations (report, export, bulk fix filter). Higher values speed up large workspaces."
         },
         "a11y.scanOnSave": {
           "type": "boolean",

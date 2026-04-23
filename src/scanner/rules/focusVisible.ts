@@ -1,14 +1,49 @@
 import * as ts from 'typescript';
 import type { A11yIssue } from '../../types';
+import { getClassList } from './jsxHelpers';
 
 /**
  * Rule: focus-visible
  * WCAG 2.4.7 — Elements must not suppress focus indicators via inline styles
- * (outline: none / outline: 0) without providing an alternative.
+ * (outline: none / outline: 0) or utility classes (e.g. Tailwind's `outline-none`)
+ * without providing an alternative.
  */
+
+/** Tailwind / utility classes that suppress focus outlines. */
+const OUTLINE_REMOVE_CLASSES = new Set([
+  'outline-none', 'outline-0', 'outline-hidden',
+]);
+
+/** Tailwind / utility classes that provide alternative focus indicators.
+ * Matches bare utilities (ring-2) and their focus:/focus-visible: variants. */
+const FOCUS_ALTERNATIVE_CLASSES_RE = /^(?:focus(?:-visible)?:)?(?:ring-|shadow-|border-)/;
+
 export function checkFocusVisible(node: ts.Node, sourceFile: ts.SourceFile): A11yIssue[] {
   const issues: A11yIssue[] = [];
 
+  // ── Check className for Tailwind outline removal ──────────────────
+  if ((ts.isJsxSelfClosingElement(node) || ts.isJsxOpeningElement(node))) {
+    const classList = getClassList(node, sourceFile);
+    if (classList) {
+      const classes = classList.split(/\s+/);
+      const removesOutline = classes.some(c => OUTLINE_REMOVE_CLASSES.has(c));
+      const hasAlt = classes.some(c => FOCUS_ALTERNATIVE_CLASSES_RE.test(c));
+
+      if (removesOutline && !hasAlt) {
+        const { line, character } = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile));
+        issues.push({
+          message: 'Class `outline-none` removes the focus indicator without an alternative (WCAG 2.4.7). Add a `ring-*`, `shadow-*`, or `border-*` utility for focus visibility.',
+          rule: 'focus-visible',
+          severity: 'warning',
+          line,
+          column: character,
+          snippet: node.getText(sourceFile),
+        });
+      }
+    }
+  }
+
+  // ── Original inline-style check ───────────────────────────────────
   if (!ts.isJsxAttribute(node) || node.name.getText(sourceFile) !== 'style') {
     return issues;
   }

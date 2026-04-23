@@ -45,7 +45,6 @@ suite('Extension Integration Tests', () => {
     assert.ok(a11yCommands.includes('a11y.screenReaderPreview'), 'screenReaderPreview missing');
     assert.ok(a11yCommands.includes('a11y.setApiKey'), 'setApiKey command missing');
     assert.ok(a11yCommands.includes('a11y.generateTests'), 'generateTests command missing');
-    assert.ok(a11yCommands.includes('a11y.compareWithLastCommit'), 'compareWithLastCommit command missing');
     assert.ok(a11yCommands.includes('a11y.exportSarif'), 'exportSarif command missing');
     assert.ok(a11yCommands.includes('a11y.exportJson'), 'exportJson command missing');
   });

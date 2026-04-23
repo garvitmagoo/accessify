@@ -1,0 +1,81 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 260" width="720" height="260" role="img" aria-label="Accessify auto-fix inserts an alt attribute into the img element">
+  <defs>
+    <style>
+      .bg { fill: #1e1e1e; }
+      .gutter { fill: #252526; }
+      .line-no { fill: #858585; font-family: Menlo, Consolas, monospace; font-size: 13px; }
+      .code { font-family: Menlo, Consolas, monospace; font-size: 14px; }
+      .tag { fill: #569cd6; }
+      .attr { fill: #9cdcfe; }
+      .attr-new { fill: #9cdcfe; }
+      .str { fill: #ce9178; }
+      .str-new { fill: #ce9178; }
+      .punct { fill: #d4d4d4; }
+
+      @keyframes fade-before { 0%, 45% { opacity: 1; } 50%, 100% { opacity: 0; } }
+      @keyframes fade-after { 0%, 48% { opacity: 0; } 55%, 100% { opacity: 1; } }
+      @keyframes bulb-appear { 0%, 15% { opacity: 0; transform: scale(0.7); } 25%, 40% { opacity: 1; transform: scale(1); } 45%, 100% { opacity: 0; } }
+      @keyframes menu-appear { 0%, 28% { opacity: 0; transform: translateY(-4px); } 36%, 50% { opacity: 1; transform: translateY(0); } 55%, 100% { opacity: 0; } }
+      @keyframes click-ring { 0%, 40% { opacity: 0; transform: scale(1); } 45%, 50% { opacity: 1; transform: scale(1); } 60%, 100% { opacity: 0; transform: scale(2); } }
+      @keyframes highlight-new { 0%, 55% { fill: #ce9178; filter: none; } 60%, 80% { fill: #fff59d; } 90%, 100% { fill: #ce9178; } }
+
+      .before-line { animation: fade-before 4s infinite; }
+      .after-line { animation: fade-after 4s infinite; }
+      .bulb { animation: bulb-appear 4s infinite; transform-origin: 212px 60px; }
+      .menu { animation: menu-appear 4s infinite; transform-origin: 228px 80px; }
+      .ring { animation: click-ring 4s infinite; transform-origin: 332px 94px; }
+      .new-attr { animation: highlight-new 4s infinite; }
+    </style>
+  </defs>
+
+  <rect class="bg" width="720" height="260" rx="8"/>
+  <rect class="gutter" x="0" y="0" width="48" height="260" rx="8"/>
+  <rect class="gutter" x="8" y="0" width="40" height="260"/>
+
+  <rect x="0" y="0" width="720" height="32" fill="#2d2d30" rx="8"/>
+  <rect x="0" y="24" width="720" height="8" fill="#2d2d30"/>
+  <rect x="12" y="0" width="160" height="32" fill="#1e1e1e"/>
+  <text x="28" y="21" class="code" fill="#cccccc">Header.tsx</text>
+
+  <text x="28" y="68" class="line-no" text-anchor="end">8</text>
+
+  <!-- Before state -->
+  <g class="before-line">
+    <text x="64" y="68" class="code">
+      <tspan class="punct">&lt;</tspan><tspan class="tag">img</tspan><tspan class="punct"> </tspan><tspan class="attr">src</tspan><tspan class="punct">=</tspan><tspan class="str">"logo.png"</tspan><tspan class="punct"> /&gt;</tspan>
+    </text>
+  </g>
+
+  <!-- After state (with alt attribute) -->
+  <g class="after-line">
+    <text x="64" y="68" class="code">
+      <tspan class="punct">&lt;</tspan><tspan class="tag">img</tspan><tspan class="punct"> </tspan><tspan class="attr">src</tspan><tspan class="punct">=</tspan><tspan class="str">"logo.png"</tspan><tspan class="punct"> </tspan><tspan class="attr-new new-attr">alt</tspan><tspan class="punct">=</tspan><tspan class="str-new new-attr">"TODO: describe image"</tspan><tspan class="punct"> /&gt;</tspan>
+    </text>
+  </g>
+
+  <!-- Lightbulb (code action trigger) -->
+  <g class="bulb">
+    <circle cx="212" cy="60" r="10" fill="#ffc107"/>
+    <path d="M 208 56 L 212 52 L 216 56 M 212 52 L 212 64" stroke="#1e1e1e" stroke-width="1.5" fill="none"/>
+    <rect x="209" y="66" width="6" height="2" fill="#1e1e1e"/>
+  </g>
+
+  <!-- Quick-fix menu -->
+  <g class="menu">
+    <rect x="224" y="74" width="240" height="60" fill="#2d2d30" stroke="#454545" rx="4"/>
+    <rect x="226" y="76" width="236" height="20" fill="#094771"/>
+    <text x="234" y="91" class="code" fill="#ffffff" font-size="12">Add alt="TODO: describe image"</text>
+    <text x="234" y="113" class="code" fill="#cccccc" font-size="12">Add aria-hidden="true"</text>
+    <text x="234" y="130" class="code" fill="#888" font-size="11">Accessify · quick fix</text>
+  </g>
+
+  <!-- Click ripple -->
+  <circle class="ring" cx="332" cy="94" r="10" fill="none" stroke="#6fc3df" stroke-width="2"/>
+
+  <!-- Label -->
+  <g font-family="-apple-system, Segoe UI, sans-serif">
+    <text x="64" y="220" font-size="12" fill="#888">Press ⌘.</text>
+    <text x="112" y="220" font-size="12" fill="#cccccc">to open Quick Fix →</text>
+    <text x="64" y="242" font-size="12" fill="#3DDC84">✓ alt attribute inserted</text>
+  </g>
+</svg>

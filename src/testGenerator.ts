@@ -15,12 +15,12 @@ import { resolveActiveDocument } from './editorUtils';
  */
 export async function generateA11yTests(): Promise<void> {
   const doc = await resolveActiveDocument(
-    new Set(['typescriptreact', 'javascriptreact']),
+    new Set(['typescriptreact', 'javascriptreact', 'html']),
     /\.a11y\.test\./i,
   );
 
   if (!doc) {
-    vscode.window.showWarningMessage('Accessify: No TSX or JSX file is open.');
+    vscode.window.showWarningMessage('Accessify: No TSX, JSX, or HTML file is open.');
     return;
   }
 
@@ -244,38 +244,6 @@ function buildTestFile(
     lines.push('');
   }
 
-  // ── focus-visible ──
-  if (byRule.has('focus-visible')) {
-    lines.push(`  it('focusable elements should have visible focus indicators', () => {`);
-    lines.push(`    const { container } = render(<${componentName} />);`);
-    lines.push(`    const focusable = container.querySelectorAll(`);
-    lines.push(`      'a[href], button, input, select, textarea, [tabindex]:not([tabindex="-1"])'`);
-    lines.push(`    );`);
-    lines.push(`    focusable.forEach((el) => {`);
-    lines.push(`      const style = window.getComputedStyle(el);`);
-    lines.push(`      if (style.outline === 'none' || style.outlineWidth === '0px') {`);
-    lines.push(`        const hasFocusReplacement = style.boxShadow !== 'none' ||`);
-    lines.push(`          style.borderColor !== style.getPropertyValue('border-color');`);
-    lines.push(`        expect(hasFocusReplacement).toBe(true);`);
-    lines.push(`      }`);
-    lines.push(`    });`);
-    lines.push(`  });`);
-    lines.push('');
-  }
-
-  // ── no-positive-tabindex ──
-  if (byRule.has('no-positive-tabindex')) {
-    lines.push(`  it('should not use positive tabIndex values', () => {`);
-    lines.push(`    const { container } = render(<${componentName} />);`);
-    lines.push(`    const withTabIndex = container.querySelectorAll('[tabindex]');`);
-    lines.push(`    withTabIndex.forEach((el) => {`);
-    lines.push(`      const tabIndex = parseInt(el.getAttribute('tabindex') || '0', 10);`);
-    lines.push(`      expect(tabIndex).toBeLessThanOrEqual(0);`);
-    lines.push(`    });`);
-    lines.push(`  });`);
-    lines.push('');
-  }
-
   // ── aria-role ──
   if (byRule.has('aria-role')) {
     lines.push(`  it('should only use valid ARIA roles', () => {`);
@@ -390,35 +358,6 @@ function buildTestFile(
     lines.push('');
   }
 
-  // ── anchor-is-valid ──
-  if (byRule.has('anchor-is-valid')) {
-    lines.push(`  it('anchors should have valid hrefs', () => {`);
-    lines.push(`    const { container } = render(<${componentName} />);`);
-    lines.push(`    const anchors = container.querySelectorAll('a');`);
-    lines.push(`    anchors.forEach((a) => {`);
-    lines.push(`      const href = a.getAttribute('href');`);
-    lines.push(`      expect(href).not.toBeNull();`);
-    lines.push(`      expect(href).not.toBe('#');`);
-    lines.push(`      expect(href).not.toMatch(/^javascript:/);`);
-    lines.push(`    });`);
-    lines.push(`  });`);
-    lines.push('');
-  }
-
-  // ── no-redundant-roles ──
-  if (byRule.has('no-redundant-roles')) {
-    lines.push(`  it('should not have redundant ARIA roles', () => {`);
-    lines.push(`    const { container } = render(<${componentName} />);`);
-    lines.push(`    expect(container.querySelectorAll('button[role="button"]').length).toBe(0);`);
-    lines.push(`    expect(container.querySelectorAll('nav[role="navigation"]').length).toBe(0);`);
-    lines.push(`    expect(container.querySelectorAll('a[role="link"]').length).toBe(0);`);
-    lines.push(`    expect(container.querySelectorAll('ul[role="list"]').length).toBe(0);`);
-    lines.push(`    expect(container.querySelectorAll('header[role="banner"]').length).toBe(0);`);
-    lines.push(`    expect(container.querySelectorAll('main[role="main"]').length).toBe(0);`);
-    lines.push(`  });`);
-    lines.push('');
-  }
-
   // ── no-autofocus ──
   if (byRule.has('no-autofocus')) {
     lines.push(`  it('should not use autoFocus attribute', () => {`);
@@ -441,29 +380,6 @@ function buildTestFile(
     lines.push(`        expect(el).toHaveAttribute('tabindex');`);
     lines.push(`      }`);
     lines.push(`    });`);
-    lines.push(`  });`);
-    lines.push('');
-  }
-
-  // ── media-has-caption ──
-  if (byRule.has('media-has-caption')) {
-    lines.push(`  it('video/audio elements should have captions', () => {`);
-    lines.push(`    const { container } = render(<${componentName} />);`);
-    lines.push(`    const mediaEls = container.querySelectorAll('video:not([muted]), audio');`);
-    lines.push(`    mediaEls.forEach((el) => {`);
-    lines.push(`      const tracks = el.querySelectorAll('track[kind="captions"], track[kind="subtitles"]');`);
-    lines.push(`      expect(tracks.length).toBeGreaterThan(0);`);
-    lines.push(`    });`);
-    lines.push(`  });`);
-    lines.push('');
-  }
-
-  // ── no-access-key ──
-  if (byRule.has('no-access-key')) {
-    lines.push(`  it('should not use accessKey attribute', () => {`);
-    lines.push(`    const { container } = render(<${componentName} />);`);
-    lines.push(`    const withAccessKey = container.querySelectorAll('[accesskey]');`);
-    lines.push(`    expect(withAccessKey.length).toBe(0);`);
     lines.push(`  });`);
     lines.push('');
   }

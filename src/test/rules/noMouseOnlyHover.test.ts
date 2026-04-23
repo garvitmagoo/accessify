@@ -33,4 +33,16 @@ describe('no-mouse-only-hover rule', () => {
     const issues = collectIssues('<div onMouseEnter={() => {}}>tooltip</div>', checkNoMouseOnlyHover);
     assert.strictEqual(issues.length, 1);
   });
+
+  /* ── Spread props ──────────────────────────────────────────────────── */
+
+  it('suppresses when spread props present', () => {
+    const issues = collectIssues('<div onMouseEnter={() => {}} {...handlers} />', checkNoMouseOnlyHover);
+    assert.strictEqual(issues.length, 0);
+  });
+
+  it('suppresses opening element with spread props', () => {
+    const issues = collectIssues('<div {...props} onMouseOver={() => {}}>tooltip</div>', checkNoMouseOnlyHover);
+    assert.strictEqual(issues.length, 0);
+  });
 });

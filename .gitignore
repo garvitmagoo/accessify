@@ -28,3 +28,20 @@ coverage/
 # Misc
 dist/
 build/
+.code-review-graph/
+
+# Dev test files (not for marketplace or GitHub)
+Test Folder/
+TestAllRules.tsx
+TestComponent.js
+TestComponent.js.map
+TestComponent.tsx
+
+# Internal planning docs
+QUICK_PUBLISH.md
+REVIEW.md
+
+# Tool/editor config
+.claude/
+.mcp.json
+.opencode.json

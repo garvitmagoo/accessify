@@ -13,7 +13,7 @@ import * as vscode from 'vscode';
  * @param excludePattern — regex to reject certain file paths (e.g. test files)
  */
 export async function resolveActiveDocument(
-  languageIds = new Set(['typescriptreact', 'javascriptreact']),
+  languageIds = new Set(['typescriptreact', 'javascriptreact', 'html']),
   excludePattern?: RegExp,
 ): Promise<vscode.TextDocument | undefined> {
   // 1. Active editor
@@ -35,7 +35,7 @@ export async function resolveActiveDocument(
     .filter((u): u is vscode.Uri => {
       if (!u) { return false; }
       const ext = u.fsPath.toLowerCase();
-      const hasExt = ext.endsWith('.tsx') || ext.endsWith('.jsx');
+      const hasExt = ext.endsWith('.tsx') || ext.endsWith('.jsx') || ext.endsWith('.html');
       if (!hasExt) { return false; }
       if (excludePattern && excludePattern.test(u.fsPath)) { return false; }
       return true;
