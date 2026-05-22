@@ -228,12 +228,12 @@ const BG_KEYS = new Set(['backgroundColor', 'background']);
 
 /**
  * Given a JSX `style={{ ... }}` expression, extract color strings for
- * foreground and background.
+ * foreground, background, and opacity.
  */
 function extractInlineColors(
   node: ts.JsxSelfClosingElement | ts.JsxOpeningElement,
   sf: ts.SourceFile,
-): { fg?: string; bg?: string; fgNode?: ts.Node; bgNode?: ts.Node } {
+): { fg?: string; bg?: string; opacity?: number; fgNode?: ts.Node; bgNode?: ts.Node } {
   for (const prop of node.attributes.properties) {
     if (!ts.isJsxAttribute(prop) || prop.name.getText(sf) !== 'style') { continue; }
     if (!prop.initializer || !ts.isJsxExpression(prop.initializer)) { continue; }
@@ -242,6 +242,7 @@ function extractInlineColors(
 
     let fg: string | undefined;
     let bg: string | undefined;
+    let opacity: number | undefined;
     let fgNode: ts.Node | undefined;
     let bgNode: ts.Node | undefined;
 
@@ -260,9 +261,18 @@ function extractInlineColors(
         if (FG_KEYS.has(key)) { fg = val; fgNode = p; }
         if (BG_KEYS.has(key)) { bg = val; bgNode = p; }
       }
+
+      if (key === 'opacity') {
+        if (ts.isNumericLiteral(p.initializer)) {
+          opacity = parseFloat(p.initializer.text);
+        } else if (ts.isStringLiteral(p.initializer)) {
+          const n = parseFloat(p.initializer.text);
+          if (!isNaN(n)) { opacity = n; }
+        }
+      }
     }
 
-    return { fg, bg, fgNode, bgNode };
+    return { fg, bg, opacity, fgNode, bgNode };
   }
   return {};
 }
@@ -305,10 +315,10 @@ function getClassNameValue(
 function extractColors(
   node: ts.JsxSelfClosingElement | ts.JsxOpeningElement,
   sf: ts.SourceFile,
-): { fg?: string; bg?: string; source: 'inline' | 'class'; fgClass?: string; bgClass?: string } {
+): { fg?: string; bg?: string; opacity?: number; source: 'inline' | 'class'; fgClass?: string; bgClass?: string } {
   const inline = extractInlineColors(node, sf);
   if (inline.fg && inline.bg) {
-    return { fg: inline.fg, bg: inline.bg, source: 'inline' };
+    return { fg: inline.fg, bg: inline.bg, opacity: inline.opacity, source: 'inline' };
   }
 
   // Try className / Tailwind utilities
@@ -320,7 +330,15 @@ function extractColors(
   const bg = inline.bg ?? tw.bg;
   const source: 'inline' | 'class' = (!inline.fg && !inline.bg && (tw.fg || tw.bg)) ? 'class' : 'inline';
 
-  return { fg, bg, source, fgClass: tw.fgClass, bgClass: tw.bgClass };
+  return { fg, bg, opacity: inline.opacity, source, fgClass: tw.fgClass, bgClass: tw.bgClass };
+}
+
+function blendAgainstWhite(c: RGB, alpha: number): RGB {
+  return {
+    r: Math.round(alpha * c.r + (1 - alpha) * 255),
+    g: Math.round(alpha * c.g + (1 - alpha) * 255),
+    b: Math.round(alpha * c.b + (1 - alpha) * 255),
+  };
 }
 
 /* ── Rule entry point ───────────────────────────────────────────────────── */
@@ -337,7 +355,7 @@ export function checkColorContrast(node: ts.Node, sourceFile: ts.SourceFile): A1
     return issues;
   }
 
-  const { fg, bg, source, fgClass, bgClass } = extractColors(node, sourceFile);
+  const { fg, bg, opacity, source, fgClass, bgClass } = extractColors(node, sourceFile);
 
   // We can only check when both colors are statically resolvable
   if (!fg || !bg) { return issues; }
@@ -346,7 +364,13 @@ export function checkColorContrast(node: ts.Node, sourceFile: ts.SourceFile): A1
   const bgRgb = parseColor(bg);
   if (!fgRgb || !bgRgb) { return issues; }
 
-  const ratio = contrastRatio(fgRgb, bgRgb);
+  // When `opacity` is set on the element, both fg and bg are composited against
+  // the page background (assumed white). Blend before checking contrast.
+  const hasOpacity = opacity !== undefined && opacity < 1;
+  const effectiveFgRgb = hasOpacity ? blendAgainstWhite(fgRgb, opacity!) : fgRgb;
+  const effectiveBgRgb = hasOpacity ? blendAgainstWhite(bgRgb, opacity!) : bgRgb;
+
+  const ratio = contrastRatio(effectiveFgRgb, effectiveBgRgb);
   const ratioStr = ratio.toFixed(2);
 
   // WCAG AA requires ≥ 4.5 for normal text
@@ -358,7 +382,31 @@ export function checkColorContrast(node: ts.Node, sourceFile: ts.SourceFile): A1
     const data: Record<string, string> = { foreground: fg, background: bg, source };
     let suggestion = '';
 
-    if (source === 'class' && fgClass) {
+    if (hasOpacity) {
+      data.hasOpacity = 'true';
+      data.opacity = String(opacity);
+      // Check if even pure black text (after opacity blending) can achieve 4.5:1
+      const blackEffective = blendAgainstWhite({ r: 0, g: 0, b: 0 }, opacity!);
+      const maxContrast = contrastRatio(blackEffective, effectiveBgRgb);
+      if (maxContrast < 4.5) {
+        data.opacityUnfixable = 'true';
+        suggestion = ` With \`opacity: ${opacity}\`, no text color can achieve 4.5:1. Remove \`opacity\` or use \`rgba()\` for background transparency instead.`;
+      } else {
+        // Find a raw fg color such that blend(raw, opacity) achieves 4.5:1 against effectiveBg
+        const effectiveBgHex = `#${effectiveBgRgb.r.toString(16).padStart(2,'0')}${effectiveBgRgb.g.toString(16).padStart(2,'0')}${effectiveBgRgb.b.toString(16).padStart(2,'0')}`;
+        const effectiveFgHex = `#${effectiveFgRgb.r.toString(16).padStart(2,'0')}${effectiveFgRgb.g.toString(16).padStart(2,'0')}${effectiveFgRgb.b.toString(16).padStart(2,'0')}`;
+        const workingEffectiveFg = suggestAccessibleForeground(effectiveFgHex, effectiveBgHex);
+        if (workingEffectiveFg) {
+          const wef = parseColor(workingEffectiveFg)!;
+          const rawR = Math.max(0, Math.min(255, Math.round((wef.r - (1 - opacity!) * 255) / opacity!)));
+          const rawG = Math.max(0, Math.min(255, Math.round((wef.g - (1 - opacity!) * 255) / opacity!)));
+          const rawB = Math.max(0, Math.min(255, Math.round((wef.b - (1 - opacity!) * 255) / opacity!)));
+          const rawHex = `#${rawR.toString(16).padStart(2,'0')}${rawG.toString(16).padStart(2,'0')}${rawB.toString(16).padStart(2,'0')}`;
+          data.suggestedForeground = rawHex;
+          suggestion = ` Suggested fix: change foreground to "${rawHex}" (accounts for opacity ${opacity}).`;
+        }
+      }
+    } else if (source === 'class' && fgClass) {
       data.fgClass = fgClass;
       if (bgClass) { data.bgClass = bgClass; }
       const suggestedClass = suggestAccessibleTailwindClass(fgClass, bg, parseColor, contrastRatio);
@@ -375,7 +423,7 @@ export function checkColorContrast(node: ts.Node, sourceFile: ts.SourceFile): A1
     }
 
     issues.push({
-      message: `Insufficient color contrast — ratio ${ratioStr}:1 (foreground: "${fg}", background: "${bg}")${via}. WCAG AA requires ≥ 4.5:1 for normal text.${suggestion}`,
+      message: `Insufficient color contrast — ratio ${ratioStr}:1 (foreground: "${fg}", background: "${bg}"${hasOpacity ? `, opacity: ${opacity}` : ''})${via}. WCAG AA requires ≥ 4.5:1 for normal text.${suggestion}`,
       rule: 'color-contrast',
       severity: ratio < 3 ? 'error' : 'warning',
       line,

@@ -186,9 +186,12 @@ export class A11yCodeActionProvider implements vscode.CodeActionProvider {
         actions.push(staticFix);
       }
 
-      // Add an AI-powered fix option
+      // Add an AI-powered fix option — skip for rules where the static fix is complete
+      // and the AI has no structured action type to express the change (e.g. inline style values).
+      const STATIC_ONLY_RULES = new Set(['color-contrast', 'no-autofocus', 'heading-order']);
+      const rule = getRuleId(diagnostic);
       const config = vscode.workspace.getConfiguration('a11y');
-      if (config.get<string>('aiProvider', 'none') !== 'none') {
+      if (config.get<string>('aiProvider', 'none') !== 'none' && !STATIC_ONLY_RULES.has(rule)) {
         const aiFix = new vscode.CodeAction(
           `Accessify: AI Fix - ${diagnostic.message}`,
           vscode.CodeActionKind.QuickFix,
@@ -330,6 +333,11 @@ export class A11yCodeActionProvider implements vscode.CodeActionProvider {
         const bg = data?.background ?? diagnostic.message.match(/background: "([^"]+)"/)?.[1];
         if (!fg || !bg) { return null; }
 
+        // When opacity makes the contrast unfixable by color alone, remove opacity
+        if (data?.opacityUnfixable === 'true') {
+          return this.createRemoveStylePropertyFix(document, diagnostic, 'opacity', 'Remove opacity (no text color can fix contrast at this opacity level)');
+        }
+
         // Tailwind class-based fix
         const fgClass = data?.fgClass;
         const suggestedFgClass = data?.suggestedFgClass;
@@ -337,8 +345,8 @@ export class A11yCodeActionProvider implements vscode.CodeActionProvider {
           return this.createReplaceTailwindColorFix(document, diagnostic, fgClass, suggestedFgClass);
         }
 
-        // Inline style fix
-        const fixedFg = suggestAccessibleForeground(fg, bg);
+        // Inline style fix — use pre-computed suggestion from scanner (accounts for opacity)
+        const fixedFg = data?.suggestedForeground ?? suggestAccessibleForeground(fg, bg);
         if (fixedFg) {
           return this.createReplaceColorFix(document, diagnostic, fg, fixedFg);
         }
@@ -408,9 +416,136 @@ export class A11yCodeActionProvider implements vscode.CodeActionProvider {
         );
       }
 
+      case 'page-title': {
+        return this.createInsertChildElementFix(
+          document,
+          diagnostic,
+          '<title>Page Title</title>',
+          'Add <title> to <Head>',
+        );
+      }
+
+      case 'media-has-caption': {
+        return this.createInsertChildElementFix(
+          document,
+          diagnostic,
+          '<track kind="captions" src="" srcLang="en" label="English" />',
+          'Add <track> captions to media element',
+        );
+      }
+
+      case 'autocomplete-valid': {
+        return this.createInsertAttributeFix(
+          document,
+          diagnostic,
+          'autoComplete="off"',
+          'Set autoComplete="off"',
+        );
+      }
+
+      case 'label-has-associated-control': {
+        return this.createInsertAttributeFix(
+          document,
+          diagnostic,
+          'htmlFor="TODO: input-id"',
+          'Add htmlFor attribute to <label>',
+        );
+      }
+
+      case 'anchor-is-valid': {
+        const msg = diagnostic.message;
+        if (msg.includes('href')) {
+          return this.createInsertAttributeFix(
+            document,
+            diagnostic,
+            'href="#"',
+            'Add href attribute to anchor',
+          );
+        }
+        return this.createInsertAttributeFix(
+          document,
+          diagnostic,
+          'aria-label="TODO: describe link"',
+          'Add aria-label to anchor',
+        );
+      }
+
+      case 'no-mouse-only-hover': {
+        return this.createInsertAttributesFix(
+          document,
+          diagnostic,
+          ['onFocus={() => {}}', 'onBlur={() => {}}'],
+          'Add onFocus/onBlur to match mouse hover handlers',
+        );
+      }
+
       default:
         return null;
     }
+  }
+
+  private createInsertChildElementFix(
+    document: vscode.TextDocument,
+    diagnostic: vscode.Diagnostic,
+    childElement: string,
+    title: string,
+  ): vscode.CodeAction | null {
+    const fix = new vscode.CodeAction(
+      `Accessify: ${title}`,
+      vscode.CodeActionKind.QuickFix,
+    );
+    fix.diagnostics = [diagnostic];
+
+    const tagLine = diagnostic.range.start.line;
+    const tagStart = diagnostic.range.start.character;
+    const lineText = document.lineAt(tagLine).text;
+    const parentIndent = lineText.match(/^(\s*)/)?.[1] ?? '';
+    const childIndent = parentIndent + '  ';
+
+    const edit = new vscode.WorkspaceEdit();
+
+    const closeIdx = findOpeningTagClose(lineText, tagStart);
+    if (closeIdx !== -1) {
+      edit.insert(document.uri, new vscode.Position(tagLine, closeIdx + 1), `\n${childIndent}${childElement}`);
+      fix.edit = edit;
+      fix.isPreferred = true;
+      return fix;
+    }
+
+    const multiline = findOpeningTagCloseMultiline(document, tagLine, tagStart);
+    if (multiline) {
+      edit.insert(document.uri, new vscode.Position(multiline.line, multiline.column + 1), `\n${childIndent}${childElement}`);
+      fix.edit = edit;
+      fix.isPreferred = true;
+      return fix;
+    }
+
+    return null;
+  }
+
+  private createRemoveStylePropertyFix(
+    document: vscode.TextDocument,
+    diagnostic: vscode.Diagnostic,
+    property: string,
+    title: string,
+  ): vscode.CodeAction | null {
+    const startLine = diagnostic.range.start.line;
+    const searchLimit = Math.min(startLine + 30, document.lineCount - 1);
+    const propPattern = new RegExp(`^(\\s*)${escapeRegExp(property)}\\s*:[^,}\\n]+,?\\s*$`);
+
+    for (let i = startLine; i <= searchLimit; i++) {
+      const lineText = document.lineAt(i).text;
+      if (propPattern.test(lineText)) {
+        const fix = new vscode.CodeAction(`Accessify: ${title}`, vscode.CodeActionKind.QuickFix);
+        fix.diagnostics = [diagnostic];
+        const edit = new vscode.WorkspaceEdit();
+        edit.delete(document.uri, new vscode.Range(i, 0, i + 1, 0));
+        fix.edit = edit;
+        fix.isPreferred = true;
+        return fix;
+      }
+    }
+    return null;
   }
 
   private createInsertAttributeFix(
@@ -627,7 +762,7 @@ export class A11yCodeActionProvider implements vscode.CodeActionProvider {
     diagnostic: vscode.Diagnostic,
     originalColor: string,
     fixedColor: string,
-  ): vscode.CodeAction {
+  ): vscode.CodeAction | null {
     const fix = new vscode.CodeAction(
       `Accessify: Adjust foreground color to "${fixedColor}" for contrast`,
       vscode.CodeActionKind.QuickFix,
@@ -635,19 +770,23 @@ export class A11yCodeActionProvider implements vscode.CodeActionProvider {
     fix.diagnostics = [diagnostic];
 
     const edit = new vscode.WorkspaceEdit();
-    const lineNum = diagnostic.range.start.line;
-    const lineText = document.lineAt(lineNum).text;
-
+    const diagLine = diagnostic.range.start.line;
+    // Scan the entire tag span — color: property may be on a different line in multiline style objects
+    const tagSpan = findJsxOpeningTagSpan(document, diagLine, diagnostic.range.start.character);
     const colorPattern = new RegExp(`(color:\\s*["'])${escapeRegExp(originalColor)}(["'])`, 'i');
-    const match = lineText.match(colorPattern);
-    if (match && match.index !== undefined) {
-      const valueStart = match.index + match[1].length;
-      const range = new vscode.Range(lineNum, valueStart, lineNum, valueStart + originalColor.length);
-      edit.replace(document.uri, range, fixedColor);
+
+    for (let i = tagSpan.startLine; i <= tagSpan.endLine; i++) {
+      const lineText = document.lineAt(i).text;
+      const match = lineText.match(colorPattern);
+      if (match && match.index !== undefined) {
+        const valueStart = match.index + match[1].length;
+        edit.replace(document.uri, new vscode.Range(i, valueStart, i, valueStart + originalColor.length), fixedColor);
+        fix.edit = edit;
+        fix.isPreferred = true;
+        return fix;
+      }
     }
-    fix.edit = edit;
-    fix.isPreferred = true;
-    return fix;
+    return null;
   }
 
   private createReplaceTailwindColorFix(
