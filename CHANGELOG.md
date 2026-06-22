@@ -1,5 +1,24 @@
 # Changelog
 
+## [1.1.1] - 2026-06-22
+
+### Added
+
+- **`no-target-blank-noopener` rule** (4.1.2) — flags `<a>`/`<area>`/`<form>` with `target="_blank"` but no `rel="noopener"`/`noreferrer`, with a deterministic quick fix.
+- **`no-autoplay-media` rule** (1.4.2) — flags autoplaying `<video>`/`<audio>` without `muted` or `controls`, with a quick fix that adds `muted`.
+- **`no-duplicate-id` rule** (4.1.1) — flags duplicate `id` values within a file.
+- **`aria-valid-ref` rule** (1.3.1) — flags `aria-labelledby`/`-describedby`/`-controls` pointing at a missing `id`.
+- **`aria-pattern` state-attribute checks** — extended to require `aria-checked`/`aria-valuenow`/`aria-selected` on the relevant widget roles.
+
+### Removed
+
+- **`prefer-semantic-elements` rule** — removed the rule that flagged `<div>`/`<span>` with ARIA roles having native HTML equivalents.
+- **`nextjs-image-alt` rule** — merged into `img-alt`, which now covers both `<img>` and Next.js `<Image>`.
+
+### Fixed
+
+- **Extension host freeze during AI fixes** — fixed an infinite loop in the JSX attribute parser (`findAttributeLocation`) that could hang the extension host when processing certain multi-line elements.
+
 ## [1.1.0] - 2026-04-22
 
 ### Added

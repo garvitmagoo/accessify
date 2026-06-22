@@ -32,13 +32,16 @@ const RULE_MAP: Record<string, string> = {
   'click-events-have-key-events': 'click-events-have-key-events',
   'autocomplete-valid': 'autocomplete-valid',
   'no-mouse-only-hover': 'no-mouse-only-hover',
-  'nextjs-image-alt': 'image-alt',
   'nextjs-link-text': 'link-name',
   'nextjs-head-lang': 'html-has-lang',
   'no-autofocus': 'no-autofocus',
   'interactive-supports-focus': 'interactive-supports-focus',
   'no-noninteractive-element-interactions': 'no-noninteractive-element-interactions',
   'svg-has-accessible-name': 'svg-img-alt',
+  'no-target-blank-noopener': 'aria-allowed-attr',
+  'no-autoplay-media': 'no-autoplay-audio',
+  'no-duplicate-id': 'duplicate-id',
+  'aria-valid-ref': 'aria-valid-attr-value',
 };
 
 /** Impact → base confidence modifier. Higher impact = more confident the fix is important. */
@@ -136,11 +139,6 @@ const STATIC_FIX_RISKS: Record<string, StaticFixRisk | ((ctx?: string) => Static
     reasoning: 'Adjusts foreground color to meet WCAG 2.1 AA minimum contrast ratio of 4.5:1 (WCAG 1.4.3). The new color is computed algorithmically and may not match the design system.',
     caveat: 'The adjusted color meets contrast requirements but may not align with your design tokens. Consider using your nearest design-system color instead.',
   },
-  'nextjs-image-alt': {
-    confidence: 60,
-    reasoning: 'Adds alt="" to Next.js Image, marking it as decorative (WCAG 1.1.1). If the image is informational, a descriptive alt is needed instead.',
-    caveat: 'Same risk as img-alt: verify the image is truly decorative.',
-  },
   'nextjs-head-lang': {
     confidence: 95,
     reasoning: 'Adds lang="en" to the HTML element (WCAG 3.1.1). Defaults to English — change it if the page language differs.',
@@ -179,6 +177,25 @@ const STATIC_FIX_RISKS: Record<string, StaticFixRisk | ((ctx?: string) => Static
     confidence: 60,
     reasoning: 'Adds aria-label placeholder to SVG element (WCAG 1.1.1). For decorative SVGs, use aria-hidden="true" instead.',
     caveat: 'Replace the TODO placeholder with a meaningful description of the SVG content.',
+  },
+  'no-target-blank-noopener': {
+    confidence: 95,
+    reasoning: 'Adds rel="noopener noreferrer" to a target="_blank" link, preventing reverse-tabnabbing and stripping the referrer. Safe, recommended default.',
+  },
+  'no-autoplay-media': {
+    confidence: 75,
+    reasoning: 'Adds the muted attribute so autoplaying media produces no sound, satisfying WCAG 1.4.2. If the audio is essential, add controls instead so users can stop it.',
+    caveat: 'If users need to hear the audio, add `controls` instead of muting.',
+  },
+  'no-duplicate-id': {
+    confidence: 30,
+    reasoning: 'Duplicate IDs require a human decision about which element to rename and what references to update (WCAG 4.1.1). No safe automatic fix.',
+    caveat: 'Rename one of the duplicates and update any aria-*/htmlFor references that point to it.',
+  },
+  'aria-valid-ref': {
+    confidence: 30,
+    reasoning: 'A broken aria reference needs either the missing id added to a real element or the reference corrected (WCAG 1.3.1). No safe automatic fix.',
+    caveat: 'Add the referenced id to the intended element, or correct the reference value.',
   },
 };
 
@@ -350,6 +367,23 @@ export function validateFix(
       if (/role\s*=\s*"[a-z]+"/.test(replacement)) {
         confidence = Math.min(100, confidence + 5);
         notes.push('ARIA role updated');
+      }
+      break;
+
+    case 'no-target-blank-noopener':
+      if (/rel\s*=\s*["'][^"']*noopener/.test(replacement)) {
+        confidence = Math.min(100, confidence + 10);
+        notes.push('rel="noopener" added to target="_blank" link');
+      } else {
+        confidence = Math.max(10, confidence - 30);
+        notes.push('Fix does not add rel="noopener"');
+      }
+      break;
+
+    case 'no-autoplay-media':
+      if (/\bmuted\b|\bcontrols\b/.test(replacement)) {
+        confidence = Math.min(100, confidence + 10);
+        notes.push('muted/controls added to autoplaying media');
       }
       break;
   }

@@ -166,8 +166,8 @@ function buildTestFile(
     byRule.set(issue.rule, arr);
   }
 
-  // ── img-alt / nextjs-image-alt ──
-  const imgIssues = [...(byRule.get('img-alt') || []), ...(byRule.get('nextjs-image-alt') || [])];
+  // ── img-alt ──
+  const imgIssues = [...(byRule.get('img-alt') || [])];
   if (imgIssues.length > 0) {
     lines.push(`  it('images should have accessible alt text', () => {`);
     lines.push(`    render(<${componentName} />);`);

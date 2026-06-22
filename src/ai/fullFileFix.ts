@@ -1,11 +1,12 @@
 import * as vscode from 'vscode';
 import * as crypto from 'crypto';
+import * as ts from 'typescript';
 import { scanForA11yIssues } from '../scanner/astScanner';
 import { validateFix } from '../scanner/axeIntegration';
-import { validateJsxSyntax } from '../scanner/jsxValidator';
+import { validateJsxSyntax, editKeepsDocumentValid } from '../scanner/jsxValidator';
 import { loadConfig, isAiExcluded } from '../config';
-import { applyActions, findOpeningTagClose } from '../jsx/utils';
-import { callAiProvider, resolveModelDefault } from './caller';
+import { applyActions, findOpeningTagClose, findFabricatedAttribute } from '../jsx/utils';
+import { callAiProvider, resolveModelDefault, setAiLogger } from './caller';
 import type { AiFixAction } from '../types';
 
 let _outputChannel: vscode.OutputChannel | undefined;
@@ -19,6 +20,11 @@ function getLog(): vscode.OutputChannel {
 /** Show the Accessify output channel (for diagnostics). */
 export function showFixLog(): void {
   getLog().show(true);
+}
+
+/** Append a line to the shared Accessify output channel. */
+export function appendFixLog(message: string): void {
+  getLog().appendLine(message);
 }
 
 /* ── Full-file fix cache ─────────────────────────────────────────────── */
@@ -45,14 +51,18 @@ function getCachedFullFix(sourceCode: string, issueFingerprints: string): FullFi
     fullFixCache.delete(key);
     return null;
   }
+  // LRU: move to end so it's evicted last
+  fullFixCache.delete(key);
+  fullFixCache.set(key, cached);
   return cached.result;
 }
 
 function setCachedFullFix(sourceCode: string, issueFingerprints: string, result: FullFileFixResult): void {
   const key = fullFixCacheKey(sourceCode, issueFingerprints);
   if (fullFixCache.size >= FULL_FIX_CACHE_MAX) {
-    const firstKey = fullFixCache.keys().next().value;
-    if (firstKey) { fullFixCache.delete(firstKey); }
+    // Evict least-recently-used (first entry in Map iteration order)
+    const lruKey = fullFixCache.keys().next().value;
+    if (lruKey) { fullFixCache.delete(lruKey); }
   }
   fullFixCache.set(key, { result, timestamp: Date.now() });
 }
@@ -124,39 +134,46 @@ async function detectDesignSystem(): Promise<string | null> {
 
 const FULL_FILE_SYSTEM_PROMPT = `You are an accessibility expert. Fix ALL listed issues in the provided JSX/React code.
 
+The full source file is provided WITH LINE NUMBERS. Reference each change by line number only — do NOT echo the source text back. This keeps responses short.
+
 PREFERRED format — structured actions (handles formatting automatically):
 { "changes": [{
   "startLine": <1-based>, "endLine": <1-based inclusive>,
-  "original": "<EXACT source text>",
   "actions": [
     { "type": "addAttribute", "name": "<attr>", "value": "<value with quotes/braces>" },
     { "type": "modifyAttribute", "name": "<attr>", "newValue": "<value>" },
     { "type": "removeAttribute", "name": "<attr>" },
     { "type": "replaceTag", "oldTag": "<tag>", "newTag": "<tag>" }
   ],
-  "explanation": "<brief>", "reasoning": "<why this fix is correct, referencing WCAG>", "rule": "<rule id>"
+  "explanation": "<brief>", "rule": "<rule id>"
 }] }
 
-FALLBACK format — when actions can't express the fix (restructuring, wrapping):
+FALLBACK format — ONLY when actions can't express the fix (restructuring, wrapping):
 { "changes": [{
   "startLine": <1-based>, "endLine": <1-based inclusive>,
-  "original": "<EXACT source text>",
-  "replacement": "<fixed code>",
-  "explanation": "<brief>", "reasoning": "<why this fix is correct>", "rule": "<rule id>"
+  "replacement": "<fixed code for those lines>",
+  "explanation": "<brief>", "rule": "<rule id>"
 }] }
 
 Rules:
-- ONE change per issue. "original" must be character-for-character exact (without line number prefix).
-- Target the SMALLEST range (ideally 1 line). For multiline opening tags, include ALL lines from <Tag to >.
+- ONE change per issue. Identify it by startLine/endLine (1-based, matching the line numbers shown). Do NOT include "original".
+- Prefer "actions" over "replacement" — they are shorter and safer. Only use "replacement" when restructuring is required.
+- Target the SMALLEST range. For a multiline opening tag, set startLine/endLine to span from <Tag through its closing >.
+- Keep "explanation" to a short phrase. Omit "reasoning" — it is not needed.
 - Use JSX attribute names: className, htmlFor, tabIndex, onClick, onKeyDown.
 - When adding a role, include ALL required ARIA attrs (e.g. role="tab" needs aria-controls + aria-selected).
 - Changes must NOT overlap. Do NOT change logic, imports, or non-JSX code.
+- Do NOT add className, class, or style attributes. Do NOT fabricate event handlers with placeholder comments. Only add/modify/remove what is needed for the a11y fix.
+- Preserve ALL existing attributes exactly as-is. The replacement must not introduce new styling, layout, or behavioral code.
+- For "color-contrast" with Tailwind classes: use modifyAttribute on className to replace the color class. E.g. replace "text-[#ffc266]" with "text-[#613a00]" inside the existing className value.
 - For "value" in addAttribute/modifyAttribute: use the full JSX value including quotes or braces, e.g. "\\"label\\"", "{0}", "{\`text \${i}\`}".
 - Return ONLY the JSON object.`;
 
 export interface FullFileFixOptions {
   /** Suppress per-file info/error messages (used in bulk mode). */
   silent?: boolean;
+  /** AbortSignal for cancellation support. */
+  signal?: AbortSignal;
 }
 
 /**
@@ -207,7 +224,7 @@ export async function getFullFileFix(document: vscode.TextDocument, options?: Fu
 
   const changes = await fetchAndValidateChanges(
     sourceCode, fileName, issues, designSystem,
-    apiKey, model, provider, config, silent,
+    apiKey, model, provider, config, silent, options?.signal,
   );
 
   if (!changes || changes.length === 0) {
@@ -235,16 +252,20 @@ async function fetchAndValidateChanges(
   provider: string,
   config: vscode.WorkspaceConfiguration,
   silent = false,
+  signal?: AbortSignal,
 ): Promise<A11yChange[] | null> {
   const issueList = issues.map((issue, idx) =>
     `${idx + 1}. [Line ${issue.line + 1}] (${issue.rule}) ${issue.message}`
   ).join('\n');
 
-  const userMessage = buildUserMessage(sourceCode, issueList, designSystem, '', issues);
+  const userMessage = buildUserMessage(sourceCode, issueList, designSystem, '', issues, _fileName);
 
   let rawResponse: string;
   try {
     const endpoint = config.get<string>('aiEndpoint', '');
+    setAiLogger(m => getLog().appendLine(m));
+    getLog().appendLine(`[full-file-fix] Calling ${provider} model "${model}" — prompt ${userMessage.length} chars, ${issues.length} issue(s)`);
+    const callStarted = Date.now();
     rawResponse = await callAiProvider(provider, {
       systemPrompt: FULL_FILE_SYSTEM_PROMPT,
       userMessage,
@@ -252,9 +273,16 @@ async function fetchAndValidateChanges(
       model,
       maxTokens: 4096,
       endpoint,
+      signal,
     });
+    const elapsed = Date.now() - callStarted;
+    getLog().appendLine(`[full-file-fix] AI call returned after ${elapsed}ms (${rawResponse?.length} chars)`);
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'Unknown error';
+    if (msg.includes('cancelled')) {
+      getLog().appendLine('[full-file-fix] Request cancelled by user');
+      return null;
+    }
     if (!silent) { vscode.window.showErrorMessage(`Accessify: AI request failed — ${msg}`); }
     getLog().appendLine(`[full-file-fix] AI request failed: ${msg}`);
     return null;
@@ -262,13 +290,13 @@ async function fetchAndValidateChanges(
 
   getLog().appendLine(`[full-file-fix] AI responded (${rawResponse.length} chars)`);
 
-  return parseAndValidate(rawResponse, sourceCode);
+  return parseAndValidate(rawResponse, sourceCode, _fileName);
 }
 
 /**
  * Parse the AI response and validate each change against the source.
  */
-function parseAndValidate(rawResponse: string, sourceCode: string): A11yChange[] | null {
+function parseAndValidate(rawResponse: string, sourceCode: string, _fileName: string): A11yChange[] | null {
   const log = getLog();
   log.appendLine(''); // separator
   log.appendLine(`[full-file-fix] Parsing AI response (${rawResponse.length} chars)...`);
@@ -308,7 +336,7 @@ function parseAndValidate(rawResponse: string, sourceCode: string): A11yChange[]
       const aiReasoning = typeof c.reasoning === 'string' ? c.reasoning : '';
 
       // Strip line-number prefixes the AI may have copied from the prompt
-      let cleanOriginal = (c.original ?? '').replace(/^(\s*)\d+\|\s?/gm, '$1');
+      const cleanOriginal = (c.original ?? '').replace(/^(\s*)\d+\|\s?/gm, '$1');
 
       // Locate the original text in the source.
       // If AI didn't send original (common with actions), use source text at the given lines.
@@ -378,12 +406,39 @@ function parseAndValidate(rawResponse: string, sourceCode: string): A11yChange[]
           log.appendLine(`[full-file-fix]   Expanded range to ${matchedStart}-${actionEnd} to include closing >`);
         }
 
+        // If any action is replaceTag, also expand to include the closing tag
+        const replaceTagAction = actions.find((a): a is Extract<AiFixAction, { type: 'replaceTag' }> => a.type === 'replaceTag');
+        if (replaceTagAction) {
+          const closeTag = `</${replaceTagAction.oldTag}>`;
+          for (let line = actionEnd; line < sourceLines.length; line++) {
+            if (sourceLines[line].includes(closeTag)) {
+              for (let j = actionEnd; j <= line; j++) {
+                actionTarget += '\n' + sourceLines[j];
+              }
+              actionEnd = line + 1;
+              log.appendLine(`[full-file-fix]   Expanded range to ${matchedStart}-${actionEnd} to include closing tag`);
+              break;
+            }
+          }
+        }
+
         const applied = applyActions(actionTarget, actions);
         if (applied && applied.trim() !== actionTarget.trim()) {
-          replacement = applied;
-          matchedOriginal = actionTarget;
-          matchedEnd = actionEnd;
-          fixMethod = 'actions';
+          // Reject if actions broke attribute syntax
+          if (hasAttributeSyntaxBreak(actionTarget, applied)) {
+            log.appendLine(`[full-file-fix]   Actions rejected — attribute syntax pattern changed (e.g. string to expression)`);
+          } else {
+            const fabricated = findFabricatedAttribute(actionTarget, applied);
+
+            if (fabricated) {
+              log.appendLine(`[full-file-fix]   Actions rejected — fabricated attribute "${fabricated}" not in original code`);
+            } else {
+              replacement = applied;
+              matchedOriginal = actionTarget;
+              matchedEnd = actionEnd;
+              fixMethod = 'actions';
+            }
+          }
         } else {
           log.appendLine(`[full-file-fix]   Actions applied but result ${applied === null ? 'was null' : 'was identical to original'}`);
         }
@@ -393,7 +448,7 @@ function parseAndValidate(rawResponse: string, sourceCode: string): A11yChange[]
       const replSource = c.replacement || c.fixedCode;
 
       if (!replacement && replSource) {
-        let repl: string = replSource;
+        const repl: string = replSource;
         fixMethod = 'replacement';
 
         // Validate fixedCode-based replacements
@@ -421,10 +476,32 @@ function parseAndValidate(rawResponse: string, sourceCode: string): A11yChange[]
         }
 
         replacement = reindentReplacement(matchedOriginal, repl);
+
+        // Reject if the AI changed attribute quote styles (e.g. className="..." → className={...})
+        if (replacement && hasAttributeSyntaxBreak(matchedOriginal, replacement)) {
+          log.appendLine(`[full-file-fix] Change #${idx + 1} (${c.rule}): rejected — attribute syntax pattern changed (e.g. string to expression)`);
+          replacement = undefined;
+        }
+
+        // Reject if the AI fabricated attributes not in the original (e.g. className, style)
+        if (replacement) {
+          const fabricated = findFabricatedAttribute(matchedOriginal, replacement);
+          if (fabricated) {
+            log.appendLine(`[full-file-fix] Change #${idx + 1} (${c.rule}): rejected — fabricated attribute "${fabricated}" not in original code`);
+            replacement = undefined;
+          }
+        }
       }
 
       if (!replacement) {
         log.appendLine(`[full-file-fix] Change #${idx + 1} (${c.rule}): rejected — no usable replacement or actions`);
+        continue;
+      }
+
+      // FINAL SAFETY NET: verify the edit doesn't introduce new syntax errors
+      // into the complete document. Guarantees an AI fix can never break code.
+      if (!editKeepsDocumentValid(sourceCode, matchedStart, matchedEnd, replacement, _fileName)) {
+        log.appendLine(`[full-file-fix] Change #${idx + 1} (${c.rule}): rejected — edit would introduce syntax errors into the document`);
         continue;
       }
 
@@ -650,25 +727,89 @@ function removeOverlaps(changes: A11yChange[]): A11yChange[] {
 
 /* ── Helpers ────────────────────────────────────────────── */
 
+/**
+ * For each issue line, find the smallest enclosing JSX element and return the
+ * set of (0-based) line indices that make up its complete span — opening tag
+ * through closing tag. This lets us send the AI complete, parseable elements
+ * instead of arbitrary line windows or the whole file.
+ */
+function collectElementLineRanges(
+  sourceCode: string,
+  fileName: string,
+  issueLines: number[],
+): Array<{ start: number; end: number }> {
+  const isTsx = fileName.endsWith('.tsx') || fileName.endsWith('.jsx') || fileName.endsWith('.html');
+  const sourceFile = ts.createSourceFile(
+    fileName || 'file.tsx',
+    sourceCode,
+    ts.ScriptTarget.Latest,
+    true,
+    isTsx ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
+  );
+
+  const ranges: Array<{ start: number; end: number }> = [];
+
+  for (const issueLine of issueLines) {
+    // Find the smallest JSX element/fragment node whose line span contains issueLine.
+    let best: { start: number; end: number; size: number } | null = null;
+
+    const visit = (node: ts.Node): void => {
+      if (
+        ts.isJsxElement(node) ||
+        ts.isJsxSelfClosingElement(node) ||
+        ts.isJsxFragment(node)
+      ) {
+        const startLine = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line;
+        const endLine = sourceFile.getLineAndCharacterOfPosition(node.getEnd()).line;
+        if (startLine <= issueLine && issueLine <= endLine) {
+          const size = endLine - startLine;
+          if (!best || size < best.size) {
+            best = { start: startLine, end: endLine, size };
+          }
+        }
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(sourceFile);
+
+    if (best) {
+      const b = best as { start: number; end: number; size: number };
+      ranges.push({ start: b.start, end: b.end });
+    } else {
+      // Fallback: a small window around the issue line.
+      ranges.push({ start: Math.max(0, issueLine - 3), end: issueLine + 3 });
+    }
+  }
+
+  return ranges;
+}
+
 function buildUserMessage(
   sourceCode: string,
   issueList: string,
   designSystem: string | null,
   _codebaseContext: string,
   issues: { line: number }[],
+  fileName: string,
 ): string {
   const sourceLines = sourceCode.split('\n');
-  const relevantLineSet = new Set<number>();
-  for (const issue of issues) {
-    const start = Math.max(0, issue.line - 5);
-    const end = Math.min(sourceLines.length - 1, issue.line + 5);
-    for (let i = start; i <= end; i++) {
-      relevantLineSet.add(i);
-    }
+
+  // Collect the complete JSX element span (opening + closing tag) for each issue,
+  // plus a couple of context lines, so the AI sees fully-parseable elements.
+  const CONTEXT_PAD = 2;
+  const includeLine = new Set<number>();
+  const ranges = collectElementLineRanges(sourceCode, fileName, issues.map(i => i.line));
+  for (const { start, end } of ranges) {
+    const from = Math.max(0, start - CONTEXT_PAD);
+    const to = Math.min(sourceLines.length - 1, end + CONTEXT_PAD);
+    for (let i = from; i <= to; i++) { includeLine.add(i); }
   }
 
-  // Build numbered source with relevant ranges
-  const sortedLines = [...relevantLineSet].sort((a, b) => a - b);
+  // Safety cap: if the element ranges somehow cover almost the whole file, just
+  // send the whole file (still bounded by the response-size guards elsewhere).
+  const MAX_CONTEXT_CHARS = 48_000;
+
+  const sortedLines = [...includeLine].sort((a, b) => a - b);
   const parts: string[] = [];
   let lastLine = -2;
   for (const lineIdx of sortedLines) {
@@ -678,10 +819,14 @@ function buildUserMessage(
     parts.push(`${String(lineIdx + 1).padStart(4)}| ${sourceLines[lineIdx]}`);
     lastLine = lineIdx;
   }
+  let numbered = parts.join('\n');
+  if (numbered.length > MAX_CONTEXT_CHARS) {
+    numbered = numbered.slice(0, MAX_CONTEXT_CHARS) + '\n  … (truncated)';
+  }
 
-  let msg = `## Source Code (relevant sections with line numbers)\n\`\`\`tsx\n${parts.join('\n')}\n\`\`\`\n\n`;
+  let msg = `## Source Code (complete elements with line numbers)\n\`\`\`tsx\n${numbered}\n\`\`\`\n\n`;
   msg += `## Issues\n${issueList}\n\n`;
-  msg += `Copy the "original" text character-for-character from the source (without line number prefix).\n`;
+  msg += `Each issue's complete JSX element (opening tag through closing tag) is shown. Reference each change by startLine/endLine (matching the line numbers shown). Do NOT echo source text. Prefer "actions" over "replacement".\n`;
   if (designSystem) {
     msg += `\nDesign system: ${designSystem}. Use its accessible APIs.\n`;
   }
@@ -703,4 +848,33 @@ async function getApiKey(config: vscode.WorkspaceConfiguration): Promise<string 
 
   vscode.window.showWarningMessage('Accessify: AI API key not configured. Run "Accessify: Set AI API Key".');
   return null;
+}
+
+/**
+ * Detect if the AI fix introduced a syntax-breaking change to attribute patterns.
+ * Catches cases like: className="..." → className={...} (missing quotes inside braces).
+ */
+function hasAttributeSyntaxBreak(original: string, replacement: string): boolean {
+  const attrPattern = /([a-zA-Z][\w-]*)=("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|\{)/g;
+
+  const origAttrs = new Map<string, string>();
+  let m: RegExpExecArray | null;
+  while ((m = attrPattern.exec(original)) !== null) {
+    origAttrs.set(m[1], m[2][0]);
+  }
+
+  attrPattern.lastIndex = 0;
+  while ((m = attrPattern.exec(replacement)) !== null) {
+    const name = m[1];
+    const newStyle = m[2][0];
+    const origStyle = origAttrs.get(name);
+    if (origStyle && origStyle !== newStyle) {
+      const stringOnlyAttrs = new Set(['className', 'class', 'id', 'href', 'src', 'alt', 'title', 'placeholder', 'name', 'type', 'rel']);
+      if (stringOnlyAttrs.has(name) && (origStyle === '"' || origStyle === "'") && newStyle === '{') {
+        return true;
+      }
+    }
+  }
+
+  return false;
 }

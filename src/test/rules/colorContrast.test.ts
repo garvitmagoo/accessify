@@ -145,4 +145,50 @@ describe('color-contrast rule', () => {
     assert.strictEqual(issues.length, 1);
     assert.ok(issues[0].message.includes('via class utilities'));
   });
+
+  /* ── Inherited (ancestor) background resolution ──────────────────────── */
+
+  it('flags low contrast against a Tailwind background inherited from an ancestor', () => {
+    // #2a2930 (near-black) text on a #1a1a1a (dark) ancestor background.
+    const code = '<div className="bg-[#1a1a1a]"><span className="text-[#2a2930]">[ 004 ]</span></div>';
+    const issues = collectIssues(code, checkColorContrast);
+    assert.strictEqual(issues.length, 1);
+    assert.strictEqual(issues[0].rule, 'color-contrast');
+    assert.strictEqual(issues[0].data?.bgInherited, 'true');
+    assert.ok(issues[0].message.includes('inherited from an ancestor'));
+  });
+
+  it('passes when the inherited ancestor background gives sufficient contrast', () => {
+    // #2a2930 text on a white ancestor background ≈ 14:1.
+    const code = '<div className="bg-white"><span className="text-[#2a2930]">[ 004 ]</span></div>';
+    const issues = collectIssues(code, checkColorContrast);
+    assert.strictEqual(issues.length, 0);
+  });
+
+  it('resolves an inherited inline backgroundColor from an ancestor', () => {
+    const code = '<div style={{ backgroundColor: "#1a1a1a" }}><span style={{ color: "#2a2930" }}>x</span></div>';
+    const issues = collectIssues(code, checkColorContrast);
+    assert.strictEqual(issues.length, 1);
+    assert.strictEqual(issues[0].data?.bgInherited, 'true');
+  });
+
+  it('resolves a background several levels up the tree', () => {
+    const code = '<section className="bg-[#1a1a1a]"><div><p><span className="text-[#2a2930]">x</span></p></div></section>';
+    const issues = collectIssues(code, checkColorContrast);
+    assert.strictEqual(issues.length, 1);
+  });
+
+  it('does NOT guess past a nearer ancestor whose background is unresolvable', () => {
+    // Nearest ancestor sets an unresolvable bg (CSS var); we must not skip it
+    // and use the further white background — that would be a false positive.
+    const code = '<div className="bg-white"><div className="bg-[var(--c)]"><span className="text-[#2a2930]">x</span></div></div>';
+    const issues = collectIssues(code, checkColorContrast);
+    assert.strictEqual(issues.length, 0);
+  });
+
+  it('still skips when no ancestor declares a background', () => {
+    const code = '<div><span className="text-[#2a2930]">x</span></div>';
+    const issues = collectIssues(code, checkColorContrast);
+    assert.strictEqual(issues.length, 0);
+  });
 });

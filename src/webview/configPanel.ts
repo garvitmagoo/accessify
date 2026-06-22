@@ -19,7 +19,6 @@ const ALL_RULES: { id: string; label: string }[] = [
   { id: 'interactive-supports-focus', label: 'Interactive elements focusable' },
   { id: 'no-noninteractive-element-interactions', label: 'No handlers on non-interactive elements' },
   { id: 'svg-has-accessible-name', label: 'SVG accessible name' },
-  { id: 'nextjs-image-alt', label: 'Next.js Image alt text' },
   { id: 'nextjs-head-lang', label: 'Next.js Html lang attribute' },
   { id: 'nextjs-link-text', label: 'Next.js Link discernible text' },
   { id: 'anchor-is-valid', label: 'Anchor is valid' },
@@ -27,8 +26,11 @@ const ALL_RULES: { id: string; label: string }[] = [
   { id: 'label-has-associated-control', label: 'Label has associated control' },
   { id: 'media-has-caption', label: 'Media has captions' },
   { id: 'page-title', label: 'Page has title' },
-  { id: 'prefer-semantic-elements', label: 'Prefer semantic elements' },
   { id: 'skip-link', label: 'Skip navigation link' },
+  { id: 'no-target-blank-noopener', label: 'target="_blank" needs rel="noopener"' },
+  { id: 'no-autoplay-media', label: 'No autoplaying media without controls' },
+  { id: 'no-duplicate-id', label: 'Unique element IDs' },
+  { id: 'aria-valid-ref', label: 'ARIA id references resolve' },
 ];
 
 /**

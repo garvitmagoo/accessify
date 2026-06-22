@@ -228,6 +228,16 @@ export function suggestAccessibleTailwindClass(
   const bgRgb = parseColor(bgHex);
   if (!bgRgb) { return null; }
 
+  // Handle arbitrary value classes: text-[#hex] or text-[rgb(...)]
+  const arbMatch = fgClass.match(/^text-\[(.+)\]$/);
+  if (arbMatch) {
+    const fgRgb = parseColor(arbMatch[1]);
+    if (!fgRgb) { return null; }
+    const fixedHex = findAccessibleColor(fgRgb, bgRgb, contrastRatio);
+    if (fixedHex) { return `text-[${fixedHex}]`; }
+    return null;
+  }
+
   // Parse the class: text-{color}-{shade} or text-{special}
   const textMatch = fgClass.match(TEXT_COLOR_RE);
   if (!textMatch) { return null; }
@@ -258,4 +268,93 @@ export function suggestAccessibleTailwindClass(
   }
 
   return bestClass;
+}
+
+/**
+ * Binary-search for an accessible foreground color by adjusting lightness.
+ * Stays as close to the original hue/saturation as possible.
+ */
+function findAccessibleColor(
+  fg: { r: number; g: number; b: number },
+  bg: { r: number; g: number; b: number },
+  contrastRatio: (a: { r: number; g: number; b: number }, b: { r: number; g: number; b: number }) => number,
+): string | null {
+  // Already passes
+  if (contrastRatio(fg, bg) >= 4.5) { return null; }
+
+  const hsl = rgbToHsl(fg);
+  const bgLum = relativeLuminanceSimple(bg);
+  const goDarker = bgLum > 0.179;
+
+  let lo: number, hi: number;
+  if (goDarker) { lo = 0; hi = hsl.l; }
+  else { lo = hsl.l; hi = 1; }
+
+  let bestColor: { r: number; g: number; b: number } | null = null;
+
+  for (let i = 0; i < 30; i++) {
+    const mid = (lo + hi) / 2;
+    const testRgb = hslToRgb(hsl.h, hsl.s, mid);
+    const ratio = contrastRatio(testRgb, bg);
+
+    if (ratio >= 4.5) {
+      bestColor = testRgb;
+      if (goDarker) { lo = mid; } else { hi = mid; }
+    } else {
+      if (goDarker) { hi = mid; } else { lo = mid; }
+    }
+  }
+
+  if (!bestColor) {
+    // Fallback: black or white
+    if (contrastRatio({ r: 0, g: 0, b: 0 }, bg) >= 4.5) { return '#000000'; }
+    return '#ffffff';
+  }
+
+  return `#${bestColor.r.toString(16).padStart(2, '0')}${bestColor.g.toString(16).padStart(2, '0')}${bestColor.b.toString(16).padStart(2, '0')}`;
+}
+
+/* ── Color math helpers (self-contained to avoid circular imports) ──── */
+
+function relativeLuminanceSimple(c: { r: number; g: number; b: number }): number {
+  const [rs, gs, bs] = [c.r / 255, c.g / 255, c.b / 255].map(v =>
+    v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4),
+  );
+  return 0.2126 * rs + 0.7152 * gs + 0.0722 * bs;
+}
+
+function rgbToHsl(c: { r: number; g: number; b: number }): { h: number; s: number; l: number } {
+  const r = c.r / 255, g = c.g / 255, b = c.b / 255;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  const l = (max + min) / 2;
+  if (max === min) { return { h: 0, s: 0, l }; }
+  const d = max - min;
+  const s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+  let h: number;
+  if (max === r) { h = ((g - b) / d + (g < b ? 6 : 0)) / 6; }
+  else if (max === g) { h = ((b - r) / d + 2) / 6; }
+  else { h = ((r - g) / d + 4) / 6; }
+  return { h, s, l };
+}
+
+function hslToRgb(h: number, s: number, l: number): { r: number; g: number; b: number } {
+  if (s === 0) {
+    const v = Math.round(l * 255);
+    return { r: v, g: v, b: v };
+  }
+  const hue2rgb = (p: number, q: number, t: number) => {
+    if (t < 0) { t += 1; }
+    if (t > 1) { t -= 1; }
+    if (t < 1 / 6) { return p + (q - p) * 6 * t; }
+    if (t < 1 / 2) { return q; }
+    if (t < 2 / 3) { return p + (q - p) * (2 / 3 - t) * 6; }
+    return p;
+  };
+  const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+  const p = 2 * l - q;
+  return {
+    r: Math.round(hue2rgb(p, q, h + 1 / 3) * 255),
+    g: Math.round(hue2rgb(p, q, h) * 255),
+    b: Math.round(hue2rgb(p, q, h - 1 / 3) * 255),
+  };
 }

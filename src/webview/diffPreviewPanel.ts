@@ -1,8 +1,9 @@
 import * as vscode from 'vscode';
 import type { A11yChange, FullFileFixResult } from '../ai/fullFileFix';
 import { updateDiagnostics } from '../diagnostics';
-import { escapeHtml as esc, getNonce, getCommandBarCss, getCommandBarHtml, getCommandBarJs, ALLOWED_COMMANDS } from './utils';
+import { escapeHtml as esc, getNonce, getCommandBarCss, getCommandBarHtml, getCommandBarJs, ALLOWED_COMMANDS, changeNeedsManualEdit } from './utils';
 import { getAxeMetadata, getWcagTags, getHelpUrl } from '../scanner/axeIntegration';
+import { editKeepsDocumentValid } from '../scanner/jsxValidator';
 import { A11yReportPanel } from './reportPanel';
 import { ScreenReaderPanel } from './screenReaderPanel';
 
@@ -118,6 +119,13 @@ export class DiffPreviewPanel {
       const currentText = document.getText(rangeToReplace);
       const normalize = (s: string) => s.replace(/\r\n/g, '\n').trim();
       if (normalize(currentText) !== normalize(change.original)) {
+        skippedCount++;
+        continue;
+      }
+
+      // FINAL SAFETY NET: never apply an edit that would introduce syntax
+      // errors into the document, regardless of where the change came from.
+      if (!editKeepsDocumentValid(document.getText(), change.startLine, endLine + 1, change.replacement, document.fileName)) {
         skippedCount++;
         continue;
       }
@@ -328,9 +336,14 @@ export class DiffPreviewPanel {
       vscode.postMessage({ type: 'dismiss' });
     });
 
-    // Default: all selected
-    document.querySelectorAll('.change-checkbox').forEach(cb => { cb.checked = true; });
-    cards.forEach(c => c.classList.add('accepted'));
+    // Default: select all except changes that need manual edits
+    cards.forEach(card => {
+      const cb = card.querySelector('.change-checkbox');
+      const checked = card.dataset.needsManual !== 'true';
+      cb.checked = checked;
+      card.classList.toggle('accepted', checked);
+      card.classList.toggle('rejected', !checked);
+    });
     updateCount();
   </script>
 </body>
@@ -338,6 +351,12 @@ export class DiffPreviewPanel {
   }
 
   private buildChangeCard(change: A11yChange): string {
+    // Detect placeholder fixes that need the user to fill in a value manually.
+    const needsManual = changeNeedsManualEdit(change.replacement);
+    const manualHtml = needsManual
+      ? `<div class="reasoning">✎ Inserts a placeholder you must fill in manually — unchecked by default.</div>`
+      : '';
+
     // Reasoning section
     const reasoningHtml = change.reasoning
       ? `<div class="reasoning">${esc(change.reasoning)}</div>`
@@ -365,14 +384,15 @@ export class DiffPreviewPanel {
     }
 
     return `
-    <div class="change-card" data-id="${change.id}">
+    <div class="change-card" data-id="${change.id}" data-needs-manual="${needsManual}">
       <div class="change-header">
-        <input type="checkbox" class="checkbox change-checkbox" data-id="${change.id}" id="change-cb-${change.id}" checked aria-label="${esc(change.explanation)}" />
+        <input type="checkbox" class="checkbox change-checkbox" data-id="${change.id}" id="change-cb-${change.id}" aria-label="${esc(change.explanation)}" />
         <label for="change-cb-${change.id}"><strong>${esc(change.explanation)}</strong></label>
         <span class="rule">${esc(change.rule)}</span>        ${this.buildConfidenceBadge(change.confidence)}        <span class="lines">Lines ${change.startLine}–${change.endLine}</span>
       </div>
       ${axeHtml}
       ${reasoningHtml}
+      ${manualHtml}
       <div class="diff">
         <div class="diff-label before">Before</div>
         <div class="diff-label">After</div>

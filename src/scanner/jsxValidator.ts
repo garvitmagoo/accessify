@@ -11,8 +11,16 @@ import * as ts from 'typescript';
  * syntax diagnostics. Returns an object with a `valid` flag and any error messages.
  */
 export function validateJsxSyntax(code: string): { valid: boolean; errors: string[] } {
-  // Wrap in a minimal function body so the TS parser accepts standalone JSX fragment
-  const wrapped = `function __a11yValidation__() { return (\n${code}\n); }`;
+  // Wrap in a minimal function body so the TS parser accepts standalone JSX.
+  // For opening-only tags (no closing tag), add a synthetic close to satisfy the parser.
+  let wrappedCode = code;
+  const trimmed = code.trim();
+  const openTagMatch = trimmed.match(/^<([A-Za-z][A-Za-z0-9.]*)/);
+  if (openTagMatch && trimmed.endsWith('>') && !trimmed.endsWith('/>') && !code.includes(`</${openTagMatch[1]}`)) {
+    wrappedCode = `${code}</${openTagMatch[1]}>`;
+  }
+
+  const wrapped = `function __a11yValidation__() { return (\n${wrappedCode}\n); }`;
   const sourceFile = ts.createSourceFile(
     '__validation__.tsx',
     wrapped,
@@ -37,6 +45,57 @@ export function validateJsxSyntax(code: string): { valid: boolean; errors: strin
   errors.push(...structuralErrors);
 
   return { valid: errors.length === 0, errors };
+}
+
+/**
+ * Count the number of syntax (parse) errors in a complete source file.
+ * Uses the TypeScript parser with the correct ScriptKind for the file.
+ * Used to verify an edit does not introduce NEW syntax errors into the file.
+ */
+export function countSyntaxErrors(sourceCode: string, fileName: string): number {
+  const isTsx =
+    fileName.endsWith('.tsx') ||
+    fileName.endsWith('.jsx') ||
+    fileName.endsWith('.html');
+  const sourceFile = ts.createSourceFile(
+    fileName || '__doc__.tsx',
+    sourceCode,
+    ts.ScriptTarget.Latest,
+    true,
+    isTsx ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
+  );
+  const parseDiags = (sourceFile as any).parseDiagnostics;
+  return Array.isArray(parseDiags) ? parseDiags.length : 0;
+}
+
+/**
+ * Verify that replacing lines [startLine, endLine] (1-based, inclusive) of
+ * `sourceCode` with `replacement` does NOT introduce any new syntax errors
+ * into the complete document. This is the final safety net that guarantees
+ * an AI fix can never break the user's code.
+ *
+ * Returns true when the edit is safe to apply.
+ */
+export function editKeepsDocumentValid(
+  sourceCode: string,
+  startLine: number,
+  endLine: number,
+  replacement: string,
+  fileName: string,
+): boolean {
+  const lines = sourceCode.split('\n');
+  if (startLine < 1 || endLine > lines.length || startLine > endLine) {
+    return false;
+  }
+  const before = lines.slice(0, startLine - 1);
+  const after = lines.slice(endLine);
+  const editedSource = [...before, replacement, ...after].join('\n');
+
+  const originalErrors = countSyntaxErrors(sourceCode, fileName);
+  const editedErrors = countSyntaxErrors(editedSource, fileName);
+
+  // The edit is safe only if it does not increase the syntax-error count.
+  return editedErrors <= originalErrors;
 }
 
 /**

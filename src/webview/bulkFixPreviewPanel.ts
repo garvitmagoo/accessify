@@ -3,7 +3,7 @@ import type { A11yChange } from '../ai/fullFileFix';
 import { updateDiagnostics } from '../diagnostics';
 import { A11yReportPanel } from './reportPanel';
 import { ScreenReaderPanel } from './screenReaderPanel';
-import { escapeHtml as esc, getNonce, getCommandBarCss, getCommandBarHtml, getCommandBarJs, ALLOWED_COMMANDS } from './utils';
+import { escapeHtml as esc, getNonce, getCommandBarCss, getCommandBarHtml, getCommandBarJs, ALLOWED_COMMANDS, changeNeedsManualEdit } from './utils';
 import { getAxeMetadata, getWcagTags, getHelpUrl } from '../scanner/axeIntegration';
 
 /** A bulk fix change grouped by file. */
@@ -67,7 +67,7 @@ export class BulkFixPreviewPanel {
     switch (msg.type) {
       case 'applySelected': {
         const accepted: string[] = msg.accepted; // "fileIdx-changeId"
-        await this.applyChangesWithConfirmation(accepted);
+        await this.applyChanges(accepted);
         break;
       }
       case 'applyAll': {
@@ -75,7 +75,7 @@ export class BulkFixPreviewPanel {
         this.result.files.forEach((f, fi) => {
           f.changes.forEach(c => allKeys.push(`${fi}-${c.id}`));
         });
-        await this.applyChangesWithConfirmation(allKeys);
+        await this.applyChanges(allKeys);
         break;
       }
       case 'dismiss':
@@ -102,42 +102,6 @@ export class BulkFixPreviewPanel {
         break;
       }
     }
-  }
-
-  private async applyChangesWithConfirmation(acceptedKeys: string[]): Promise<void> {
-    if (acceptedKeys.length === 0) {
-      vscode.window.showInformationMessage('Accessify: No changes selected.');
-      return;
-    }
-
-    let placeholderCount = 0;
-
-    for (const key of acceptedKeys) {
-      const [fi, cid] = key.split('-').map(Number);
-      const entry = this.result.files[fi];
-      const change = entry?.changes.find(c => c.id === cid);
-      if (change) {
-        if (change.replacement.includes('aria-label=""') ||
-            change.replacement.includes('alt=""') ||
-            change.replacement.includes('aria-controls=""') ||
-            change.replacement.includes('autoComplete="name"') ||
-            change.replacement.includes('/* handler */')) {
-          placeholderCount++;
-        }
-      }
-    }
-
-    if (placeholderCount > 0) {
-      const choice = await vscode.window.showWarningMessage(
-        `Accessify: ${placeholderCount} change(s) insert placeholder values that need manual editing. Apply anyway?`,
-        { modal: true },
-        'Apply All Selected',
-      );
-
-      if (!choice) { return; }
-    }
-
-    return this.applyChanges(acceptedKeys);
   }
 
   private async applyChanges(acceptedKeys: string[]): Promise<void> {
@@ -560,11 +524,12 @@ export class BulkFixPreviewPanel {
       });
     });
 
-    // DEFAULT SELECTION: check all changes
+    // DEFAULT SELECTION: check all changes except those needing manual edits
     document.querySelectorAll('.change-card').forEach(card => {
       const cb = card.querySelector('.change-checkbox');
-      cb.checked = true;
-      setCardState(card, true);
+      const checked = card.dataset.needsManual !== 'true';
+      cb.checked = checked;
+      setCardState(card, checked);
     });
     document.querySelectorAll('.file-section').forEach(fs => syncFileCheckbox(fs));
     document.querySelectorAll('.folder-group').forEach(fg => syncFolderCheckbox(fg));
@@ -630,6 +595,12 @@ export class BulkFixPreviewPanel {
   private buildChangeCard(change: A11yChange, fileIdx: number): string {
     const key = `${fileIdx}-${change.id}`;
 
+    // Detect placeholder fixes that need the user to fill in a value manually.
+    const needsManual = changeNeedsManualEdit(change.replacement);
+    const manualHtml = needsManual
+      ? `<div class="caveat">\u270E Inserts a placeholder you must fill in manually \u2014 unchecked by default.</div>`
+      : '';
+
     // Reasoning section
     const reasoning = change.reasoning ?? '';
     // Extract caveat from reasoning if it contains "Caveat:"
@@ -665,7 +636,7 @@ export class BulkFixPreviewPanel {
     }
 
     return `
-    <div class="change-card" data-key="${key}">
+    <div class="change-card" data-key="${key}" data-needs-manual="${needsManual}">
       <div class="change-header">
         <input type="checkbox" class="checkbox change-checkbox" data-key="${key}" id="change-cb-${key}" aria-label="${esc(change.explanation)}" />
         <label for="change-cb-${key}"><strong>${esc(change.explanation)}</strong></label>
@@ -676,6 +647,7 @@ export class BulkFixPreviewPanel {
       ${axeHtml}
       ${reasoningHtml}
       ${caveatHtml}
+      ${manualHtml}
       <div class="diff">
         <div class="diff-label before">Before</div>
         <div class="diff-label">After</div>

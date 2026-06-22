@@ -1,4 +1,4 @@
-import * as ts from 'typescript';
+import * as ts from "typescript";
 
 export interface ScreenReaderAnnouncement {
   element: string;
@@ -10,7 +10,16 @@ export interface ScreenReaderAnnouncement {
   hasIssue: boolean;
   issueMessage?: string;
   /** Grouping category for filtering in the panel */
-  category: 'landmark' | 'heading' | 'interactive' | 'form' | 'table' | 'list' | 'image' | 'live-region' | 'other';
+  category:
+    | "landmark"
+    | "heading"
+    | "interactive"
+    | "form"
+    | "table"
+    | "list"
+    | "image"
+    | "live-region"
+    | "other";
   /** Additional description from aria-describedby or aria-description */
   description?: string;
 }
@@ -27,23 +36,38 @@ export interface TabStop {
 }
 
 const LANDMARK_ELEMENTS: Record<string, string> = {
-  'nav': 'navigation',
-  'main': 'main',
-  'aside': 'complementary',
-  'header': 'banner',
-  'footer': 'contentinfo',
-  'section': 'region',
-  'form': 'form',
+  nav: "navigation",
+  main: "main",
+  aside: "complementary",
+  header: "banner",
+  footer: "contentinfo",
+  section: "region",
+  form: "form",
 };
 
 const HEADING_RE = /^h([1-6])$/;
+
+const JSX_ENTITY_MAP: Record<string, string> = {
+  amp: "&",
+  apos: "'",
+  gt: ">",
+  lt: "<",
+  nbsp: " ",
+  quot: '"',
+};
 
 /**
  * Walk the JSX AST and produce a list of announcements simulating what
  * a screen reader would say for each semantic / interactive element.
  */
-export function simulateScreenReader(sourceCode: string, fileName: string): ScreenReaderAnnouncement[] {
-  const isTsx = fileName.endsWith('.tsx') || fileName.endsWith('.jsx') || fileName.endsWith('.html');
+export function simulateScreenReader(
+  sourceCode: string,
+  fileName: string,
+): ScreenReaderAnnouncement[] {
+  const isTsx =
+    fileName.endsWith(".tsx") ||
+    fileName.endsWith(".jsx") ||
+    fileName.endsWith(".html");
   const sourceFile = ts.createSourceFile(
     fileName,
     sourceCode,
@@ -57,6 +81,32 @@ export function simulateScreenReader(sourceCode: string, fileName: string): Scre
   /** Map from id → label text, built in a pre-pass */
   const labelMap = new Map<string, string>();
 
+  function decodeJsxEntities(text: string): string {
+    return text.replace(
+      /&(#x?[0-9a-fA-F]+|[a-zA-Z]+);/g,
+      (match, entity: string) => {
+        if (entity[0] === "#") {
+          const isHex = entity[1]?.toLowerCase() === "x";
+          const raw = isHex ? entity.slice(2) : entity.slice(1);
+          const codePoint = parseInt(raw, isHex ? 16 : 10);
+          return Number.isFinite(codePoint) &&
+            codePoint >= 0 &&
+            codePoint <= 0x10ffff
+            ? String.fromCodePoint(codePoint)
+            : match;
+        }
+        return JSX_ENTITY_MAP[entity] ?? match;
+      },
+    );
+  }
+
+  function normalizeAnnouncementText(text: string): string {
+    return decodeJsxEntities(text)
+      .replace(/\{\/\*[\s\S]*?\*\/\}/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
   function getAttr(
     node: ts.JsxSelfClosingElement | ts.JsxOpeningElement,
     name: string,
@@ -66,20 +116,21 @@ export function simulateScreenReader(sourceCode: string, fileName: string): Scre
         continue;
       }
       if (!prop.initializer) {
-        return '';
+        return "";
       }
       if (ts.isStringLiteral(prop.initializer)) {
-        return prop.initializer.text;
+        return normalizeAnnouncementText(prop.initializer.text);
       }
       if (ts.isJsxExpression(prop.initializer) && prop.initializer.expression) {
         if (ts.isStringLiteral(prop.initializer.expression)) {
-          return prop.initializer.expression.text;
+          return normalizeAnnouncementText(prop.initializer.expression.text);
         }
-        // Return the expression text without curly braces so it doesn't
-        // look like raw JSX in screen reader announcements.
-        return prop.initializer.expression.getText(sourceFile);
+        // For non-string expressions, try to produce a friendly textual
+        // representation instead of dumping raw code. This avoids showing
+        // large JS/JSX snippets in the screen reader panel (e.g. map() calls).
+        return stringifyExpression(prop.initializer.expression);
       }
-      return '';
+      return "";
     }
     return undefined;
   }
@@ -88,13 +139,31 @@ export function simulateScreenReader(sourceCode: string, fileName: string): Scre
     const parts: string[] = [];
     for (const child of element.children) {
       if (ts.isJsxText(child)) {
-        const t = child.getText(sourceFile).trim();
-        if (t) { parts.push(t); }
+        const t = normalizeAnnouncementText(child.getText(sourceFile));
+        if (t) {
+          parts.push(t);
+        }
       } else if (ts.isJsxExpression(child) && child.expression) {
+        // Avoid inserting raw expression source into the announcement.
+        // Prefer literal text, nested JSX text, or a friendly placeholder.
         if (ts.isStringLiteral(child.expression)) {
-          parts.push(child.expression.text);
+          parts.push(normalizeAnnouncementText(child.expression.text));
+        } else if (ts.isNoSubstitutionTemplateLiteral(child.expression)) {
+          parts.push(normalizeAnnouncementText(child.expression.text));
+        } else if (ts.isJsxElement(child.expression)) {
+          parts.push(getTextContent(child.expression));
+        } else if (
+          ts.isParenthesizedExpression(child.expression) &&
+          ts.isJsxElement(child.expression.expression)
+        ) {
+          parts.push(getTextContent(child.expression.expression));
+        } else if (ts.isJsxSelfClosingElement(child.expression)) {
+          // Self-closing components don't contribute textual content.
         } else {
-          parts.push(child.expression.getText(sourceFile));
+          const text = stringifyExpression(child.expression);
+          if (text) {
+            parts.push(text);
+          }
         }
       } else if (ts.isJsxElement(child)) {
         // Recurse into child elements to extract only text, not raw JSX
@@ -103,18 +172,25 @@ export function simulateScreenReader(sourceCode: string, fileName: string): Scre
       // Deliberately skip JsxSelfClosingElement children — they don't
       // contribute text content (e.g. <Box />, <Icon />, <br />).
     }
-    return parts.join(' ').replace(/\s+/g, ' ').trim();
+    return normalizeAnnouncementText(parts.join(" "));
   }
 
   // ── Pre-pass: collect <label htmlFor="id">text</label> and <InputLabel>text</InputLabel> ──
   function collectLabels(node: ts.Node): void {
     if (ts.isJsxOpeningElement(node) && ts.isJsxElement(node.parent)) {
       const tag = node.tagName.getText(sourceFile).toLowerCase();
-      if (tag === 'label' || node.tagName.getText(sourceFile) === 'InputLabel') {
-        const htmlFor = getAttr(node, 'htmlFor') || getAttr(node, 'for');
+      if (
+        tag === "label" ||
+        node.tagName.getText(sourceFile) === "InputLabel"
+      ) {
+        const htmlFor = getAttr(node, "htmlFor") || getAttr(node, "for");
         if (htmlFor) {
-          const text = getTextContent(node.parent);
-          if (text) { labelMap.set(htmlFor, text); }
+          const text = ts.isJsxElement(node.parent)
+            ? getTextContent(node.parent)
+            : stringifyExpression(node.parent as ts.Node);
+          if (text) {
+            labelMap.set(htmlFor, text);
+          }
         }
       }
     }
@@ -122,113 +198,255 @@ export function simulateScreenReader(sourceCode: string, fileName: string): Scre
   }
   collectLabels(sourceFile);
 
+  /**
+   * Produce a compact, friendly string for arbitrary expressions so the
+   * screen reader preview doesn't show raw code. Examples:
+   *  - identifiers -> "{varName}"
+   *  - array/map expressions -> "[list]"
+   *  - JSX expressions or complex nodes -> "[dynamic]"
+   */
+  function stringifyExpression(node: ts.Node): string {
+    if (ts.isIdentifier(node)) {
+      return `{${node.getText(sourceFile)}}`;
+    }
+    if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
+      return normalizeAnnouncementText(node.text);
+    }
+    if (ts.isParenthesizedExpression(node)) {
+      if (ts.isJsxElement(node.expression)) {
+        return getTextContent(node.expression);
+      }
+      if (ts.isJsxSelfClosingElement(node.expression)) {
+        return "";
+      }
+      return stringifyExpression(node.expression);
+    }
+    if (
+      ts.isCallExpression(node) ||
+      ts.isPropertyAccessExpression(node) ||
+      ts.isElementAccessExpression(node)
+    ) {
+      const text = node.getText(sourceFile);
+      if (/\bmap\b|\bfilter\b|\bjoin\b/.test(text)) {
+        return "";
+      }
+      return "[dynamic]";
+    }
+    if (ts.isArrowFunction(node) || ts.isFunctionExpression(node)) {
+      return "";
+    }
+    if (
+      ts.isTemplateExpression(node) ||
+      ts.isBinaryExpression(node) ||
+      ts.isParenthesizedExpression(node)
+    ) {
+      return "[dynamic]";
+    }
+    // Fallback to a short indication
+    return "[dynamic]";
+  }
+
   /** Components that accept a `label` prop for accessible naming */
   const LABEL_PROP_COMPONENTS = new Set([
-    'TextField', 'Select', 'Autocomplete',
-    'Checkbox', 'Radio', 'Switch', 'Slider', 'Rating',
-    'DatePicker', 'TimePicker', 'DateTimePicker',
-    'Input', 'NativeSelect', 'OutlinedInput', 'FilledInput',
+    "TextField",
+    "Select",
+    "Autocomplete",
+    "Checkbox",
+    "Radio",
+    "Switch",
+    "Slider",
+    "Rating",
+    "DatePicker",
+    "TimePicker",
+    "DateTimePicker",
+    "Input",
+    "NativeSelect",
+    "OutlinedInput",
+    "FilledInput",
     // Chakra UI
-    'NumberInput', 'PinInput',
+    "NumberInput",
+    "PinInput",
     // Ant Design
-    'InputNumber',
+    "InputNumber",
   ]);
 
   /** Resolve the accessible name for a form component, checking label prop, htmlFor, aria-label, etc. */
-  function resolveFormLabel(node: ts.JsxSelfClosingElement | ts.JsxOpeningElement, tagName: string): string {
+  function resolveFormLabel(
+    node: ts.JsxSelfClosingElement | ts.JsxOpeningElement,
+    tagName: string,
+  ): string {
     // 1. aria-label / aria-labelledby always wins
-    const ariaLabel = getAttr(node, 'aria-label');
-    if (ariaLabel) { return ariaLabel; }
-    const ariaLabelledBy = getAttr(node, 'aria-labelledby');
-    if (ariaLabelledBy) { return ariaLabelledBy; }
+    const ariaLabel = getAttr(node, "aria-label");
+    if (ariaLabel) {
+      return ariaLabel;
+    }
+    const ariaLabelledBy = getAttr(node, "aria-labelledby");
+    if (ariaLabelledBy) {
+      return ariaLabelledBy;
+    }
 
     // 2. Component `label` prop (MUI, Chakra, etc.)
     if (LABEL_PROP_COMPONENTS.has(tagName)) {
-      const labelProp = getAttr(node, 'label');
-      if (labelProp) { return labelProp; }
+      const labelProp = getAttr(node, "label");
+      if (labelProp) {
+        return labelProp;
+      }
     }
 
     // 3. htmlFor/id-based label association
-    const id = getAttr(node, 'id');
+    const id = getAttr(node, "id");
     if (id && labelMap.has(id)) {
       return labelMap.get(id)!;
     }
 
     // 4. title or placeholder as fallback
-    const title = getAttr(node, 'title');
-    if (title) { return title; }
-    const placeholder = getAttr(node, 'placeholder');
-    if (placeholder) { return placeholder; }
+    const title = getAttr(node, "title");
+    if (title) {
+      return title;
+    }
+    const placeholder = getAttr(node, "placeholder");
+    if (placeholder) {
+      return placeholder;
+    }
 
-    return '';
+    return "";
   }
 
   /** Check if a node is hidden from screen readers via aria-hidden="true" */
-  function isAriaHidden(node: ts.JsxSelfClosingElement | ts.JsxOpeningElement): boolean {
-    const val = getAttr(node, 'aria-hidden');
-    return val === 'true' || val === '';
+  function isAriaHidden(
+    node: ts.JsxSelfClosingElement | ts.JsxOpeningElement,
+  ): boolean {
+    const val = getAttr(node, "aria-hidden");
+    return val === "true" || val === "";
   }
 
   /** Build a suffix string for ARIA states like expanded, pressed, checked */
-  function getAriaStates(node: ts.JsxSelfClosingElement | ts.JsxOpeningElement): string {
+  function getAriaStates(
+    node: ts.JsxSelfClosingElement | ts.JsxOpeningElement,
+  ): string {
     const states: string[] = [];
-    const expanded = getAttr(node, 'aria-expanded');
-    if (expanded !== undefined) { states.push(expanded === 'true' ? 'expanded' : 'collapsed'); }
-    const pressed = getAttr(node, 'aria-pressed');
+    const expanded = getAttr(node, "aria-expanded");
+    if (expanded !== undefined) {
+      states.push(expanded === "true" ? "expanded" : "collapsed");
+    }
+    const pressed = getAttr(node, "aria-pressed");
     if (pressed !== undefined) {
-      states.push(pressed === 'true' ? 'pressed' : pressed === 'mixed' ? 'partially pressed' : 'not pressed');
+      states.push(
+        pressed === "true"
+          ? "pressed"
+          : pressed === "mixed"
+            ? "partially pressed"
+            : "not pressed",
+      );
     }
-    const checked = getAttr(node, 'aria-checked');
+    const checked = getAttr(node, "aria-checked");
     if (checked !== undefined) {
-      states.push(checked === 'true' ? 'checked' : checked === 'mixed' ? 'partially checked' : 'not checked');
+      states.push(
+        checked === "true"
+          ? "checked"
+          : checked === "mixed"
+            ? "partially checked"
+            : "not checked",
+      );
     }
-    const disabled = getAttr(node, 'aria-disabled') || getAttr(node, 'disabled');
-    if (disabled !== undefined && disabled !== 'false') { states.push('dimmed'); }
-    const required = getAttr(node, 'aria-required') || getAttr(node, 'required');
-    if (required !== undefined && required !== 'false') { states.push('required'); }
-    const current = getAttr(node, 'aria-current');
-    if (current && current !== 'false') { states.push(`current ${current === 'true' ? 'item' : current}`); }
-    return states.length ? ', ' + states.join(', ') : '';
+    const disabled =
+      getAttr(node, "aria-disabled") || getAttr(node, "disabled");
+    if (disabled !== undefined && disabled !== "false") {
+      states.push("dimmed");
+    }
+    const required =
+      getAttr(node, "aria-required") || getAttr(node, "required");
+    if (required !== undefined && required !== "false") {
+      states.push("required");
+    }
+    const current = getAttr(node, "aria-current");
+    if (current && current !== "false") {
+      states.push(`current ${current === "true" ? "item" : current}`);
+    }
+    return states.length ? ", " + states.join(", ") : "";
   }
 
   /** Get aria-describedby or aria-description text */
-  function getDescription(node: ts.JsxSelfClosingElement | ts.JsxOpeningElement): string | undefined {
-    return getAttr(node, 'aria-description') || getAttr(node, 'aria-describedby') || undefined;
+  function getDescription(
+    node: ts.JsxSelfClosingElement | ts.JsxOpeningElement,
+  ): string | undefined {
+    return (
+      getAttr(node, "aria-description") ||
+      getAttr(node, "aria-describedby") ||
+      undefined
+    );
   }
 
-  function process(node: ts.JsxSelfClosingElement | ts.JsxOpeningElement): void {
+  function process(
+    node: ts.JsxSelfClosingElement | ts.JsxOpeningElement,
+  ): void {
     // Skip aria-hidden elements
-    if (isAriaHidden(node)) { return; }
+    if (isAriaHidden(node)) {
+      return;
+    }
 
     const tagName = node.tagName.getText(sourceFile);
     const tagLower = tagName.toLowerCase();
-    const { line, character } = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile));
+    const { line, character } = sourceFile.getLineAndCharacterOfPosition(
+      node.getStart(sourceFile),
+    );
 
-    const ariaLabel = getAttr(node, 'aria-label');
-    const ariaLabelledBy = getAttr(node, 'aria-labelledby');
-    const role = getAttr(node, 'role');
-    const title = getAttr(node, 'title');
+    const ariaLabel = getAttr(node, "aria-label");
+    const ariaLabelledBy = getAttr(node, "aria-labelledby");
+    const role = getAttr(node, "role");
+    const title = getAttr(node, "title");
     const ariaStates = getAriaStates(node);
     const description = getDescription(node);
 
-    let textContent = '';
+    let textContent = "";
     if (ts.isJsxOpeningElement(node) && ts.isJsxElement(node.parent)) {
       textContent = getTextContent(node.parent);
     }
 
-    const computedName = ariaLabel || ariaLabelledBy || textContent || title || '';
+    const computedName =
+      ariaLabel || ariaLabelledBy || textContent || title || "";
 
-    const descSuffix = description ? `. Description: "${description}"` : '';
+    const descSuffix = description ? `. Description: "${description}"` : "";
 
     // ── Images ──
-    if (tagLower === 'img') {
-      const alt = getAttr(node, 'alt');
-      if (alt !== undefined && alt !== '') {
-        announcements.push({ element: `<${tagName}>`, role: role || 'image', accessibleName: alt, announcement: `"${alt}", image${descSuffix}`, line, column: character, hasIssue: false, category: 'image', description });
-      } else if (alt === '') {
-        announcements.push({ element: `<${tagName}>`, role: role || 'image', accessibleName: '(decorative)', announcement: '(decorative image — hidden from screen reader)', line, column: character, hasIssue: false, category: 'image' });
+    if (tagLower === "img") {
+      const alt = getAttr(node, "alt");
+      if (alt !== undefined && alt !== "") {
+        announcements.push({
+          element: `<${tagName}>`,
+          role: role || "image",
+          accessibleName: alt,
+          announcement: `"${alt}", image${descSuffix}`,
+          line,
+          column: character,
+          hasIssue: false,
+          category: "image",
+          description,
+        });
+      } else if (alt === "") {
+        announcements.push({
+          element: `<${tagName}>`,
+          role: role || "image",
+          accessibleName: "(decorative)",
+          announcement: "(decorative image — hidden from screen reader)",
+          line,
+          column: character,
+          hasIssue: false,
+          category: "image",
+        });
       } else {
-        announcements.push({ element: `<${tagName}>`, role: role || 'image', accessibleName: '', announcement: 'image (NO ACCESSIBLE NAME)', line, column: character, hasIssue: true, issueMessage: 'Image is missing alt text — screen reader cannot describe it', category: 'image' });
+        announcements.push({
+          element: `<${tagName}>`,
+          role: role || "image",
+          accessibleName: "",
+          announcement: "image (NO ACCESSIBLE NAME)",
+          line,
+          column: character,
+          hasIssue: true,
+          issueMessage:
+            "Image is missing alt text — screen reader cannot describe it",
+          category: "image",
+        });
       }
       return;
     }
@@ -239,59 +457,151 @@ export function simulateScreenReader(sourceCode: string, fileName: string): Scre
       const level = headingMatch[1];
       const name = computedName;
       if (name) {
-        announcements.push({ element: `<${tagName}>`, role: `heading level ${level}`, accessibleName: name, announcement: `"${name}", heading level ${level}${descSuffix}`, line, column: character, hasIssue: false, category: 'heading', description });
+        announcements.push({
+          element: `<${tagName}>`,
+          role: `heading level ${level}`,
+          accessibleName: name,
+          announcement: `"${name}", heading level ${level}${descSuffix}`,
+          line,
+          column: character,
+          hasIssue: false,
+          category: "heading",
+          description,
+        });
       } else {
-        announcements.push({ element: `<${tagName}>`, role: `heading level ${level}`, accessibleName: '', announcement: `heading level ${level} (EMPTY)`, line, column: character, hasIssue: true, issueMessage: 'Heading has no text content', category: 'heading' });
+        announcements.push({
+          element: `<${tagName}>`,
+          role: `heading level ${level}`,
+          accessibleName: "",
+          announcement: `heading level ${level} (EMPTY)`,
+          line,
+          column: character,
+          hasIssue: true,
+          issueMessage: "Heading has no text content",
+          category: "heading",
+        });
       }
       return;
     }
 
     // ── Buttons ──
-    const BUTTON_COMPONENTS = ['button', 'iconbutton', 'fab', 'togglebutton', 'loadingbutton', 'splitbutton'];
-    if (BUTTON_COMPONENTS.includes(tagLower) || tagName === 'IconButton' || tagName === 'Fab' || tagName === 'ToggleButton') {
-      const name = computedName || getAttr(node, 'label') || '';
+    const BUTTON_COMPONENTS = [
+      "button",
+      "iconbutton",
+      "fab",
+      "togglebutton",
+      "loadingbutton",
+      "splitbutton",
+    ];
+    if (
+      BUTTON_COMPONENTS.includes(tagLower) ||
+      tagName === "IconButton" ||
+      tagName === "Fab" ||
+      tagName === "ToggleButton"
+    ) {
+      const name = computedName || getAttr(node, "label") || "";
       if (name) {
-        announcements.push({ element: `<${tagName}>`, role: role || 'button', accessibleName: name, announcement: `"${name}", button${ariaStates}${descSuffix}`, line, column: character, hasIssue: false, category: 'interactive', description });
+        announcements.push({
+          element: `<${tagName}>`,
+          role: role || "button",
+          accessibleName: name,
+          announcement: `"${name}", button${ariaStates}${descSuffix}`,
+          line,
+          column: character,
+          hasIssue: false,
+          category: "interactive",
+          description,
+        });
       } else {
-        announcements.push({ element: `<${tagName}>`, role: role || 'button', accessibleName: '', announcement: 'button (NO ACCESSIBLE NAME)', line, column: character, hasIssue: true, issueMessage: 'Button has no accessible name — screen reader cannot identify it', category: 'interactive' });
+        announcements.push({
+          element: `<${tagName}>`,
+          role: role || "button",
+          accessibleName: "",
+          announcement: "button (NO ACCESSIBLE NAME)",
+          line,
+          column: character,
+          hasIssue: true,
+          issueMessage:
+            "Button has no accessible name — screen reader cannot identify it",
+          category: "interactive",
+        });
       }
       return;
     }
 
     // ── Chip / Tag ──
-    if (tagName === 'Chip' || tagName === 'Tag' || tagName === 'Badge') {
-      const name = computedName || getAttr(node, 'label') || '';
+    if (tagName === "Chip" || tagName === "Tag" || tagName === "Badge") {
+      const name = computedName || getAttr(node, "label") || "";
       if (name) {
-        const clickable = getAttr(node, 'onClick') !== undefined || getAttr(node, 'onDelete') !== undefined;
-        const roleStr = clickable ? 'button' : 'status';
-        announcements.push({ element: `<${tagName}>`, role: role || roleStr, accessibleName: name, announcement: `"${name}", ${tagName.toLowerCase()}${ariaStates}`, line, column: character, hasIssue: false, category: clickable ? 'interactive' : 'other' });
+        const clickable =
+          getAttr(node, "onClick") !== undefined ||
+          getAttr(node, "onDelete") !== undefined;
+        const roleStr = clickable ? "button" : "status";
+        announcements.push({
+          element: `<${tagName}>`,
+          role: role || roleStr,
+          accessibleName: name,
+          announcement: `"${name}", ${tagName.toLowerCase()}${ariaStates}`,
+          line,
+          column: character,
+          hasIssue: false,
+          category: clickable ? "interactive" : "other",
+        });
       }
       return;
     }
 
     // ── Links ──
-    if (tagLower === 'a' || tagName === 'Link' || tagName === 'NavLink') {
-      const href = getAttr(node, 'href') || getAttr(node, 'to');
+    if (tagLower === "a" || tagName === "Link" || tagName === "NavLink") {
+      const href = getAttr(node, "href") || getAttr(node, "to");
       const name = computedName;
       if (name) {
-        announcements.push({ element: `<${tagName}>`, role: role || 'link', accessibleName: name, announcement: `"${name}", link${ariaStates}${descSuffix}`, line, column: character, hasIssue: false, category: 'interactive', description });
+        announcements.push({
+          element: `<${tagName}>`,
+          role: role || "link",
+          accessibleName: name,
+          announcement: `"${name}", link${ariaStates}${descSuffix}`,
+          line,
+          column: character,
+          hasIssue: false,
+          category: "interactive",
+          description,
+        });
       } else {
-        announcements.push({ element: `<${tagName}>`, role: role || 'link', accessibleName: '', announcement: `link (NO ACCESSIBLE NAME)${href ? ` → ${href}` : ''}`, line, column: character, hasIssue: true, issueMessage: 'Link has no accessible name', category: 'interactive' });
+        announcements.push({
+          element: `<${tagName}>`,
+          role: role || "link",
+          accessibleName: "",
+          announcement: `link (NO ACCESSIBLE NAME)${href ? ` → ${href}` : ""}`,
+          line,
+          column: character,
+          hasIssue: true,
+          issueMessage: "Link has no accessible name",
+          category: "interactive",
+        });
       }
       return;
     }
 
     // ── FormControlLabel (wraps Checkbox, Radio, Switch with a label) ──
-    if (tagName === 'FormControlLabel') {
+    if (tagName === "FormControlLabel") {
       // Extract label — may be a string literal or JSX expression like label={<Typography>Text</Typography>}
-      let labelText = ariaLabel || '';
+      let labelText = ariaLabel || "";
       if (!labelText) {
         for (const prop of node.attributes.properties) {
-          if (!ts.isJsxAttribute(prop) || prop.name.getText(sourceFile) !== 'label') { continue; }
+          if (
+            !ts.isJsxAttribute(prop) ||
+            prop.name.getText(sourceFile) !== "label"
+          ) {
+            continue;
+          }
           if (prop.initializer) {
             if (ts.isStringLiteral(prop.initializer)) {
               labelText = prop.initializer.text;
-            } else if (ts.isJsxExpression(prop.initializer) && prop.initializer.expression) {
+            } else if (
+              ts.isJsxExpression(prop.initializer) &&
+              prop.initializer.expression
+            ) {
               const expr = prop.initializer.expression;
               if (ts.isStringLiteral(expr)) {
                 labelText = expr.text;
@@ -299,8 +609,11 @@ export function simulateScreenReader(sourceCode: string, fileName: string): Scre
                 labelText = getTextContent(expr);
               } else if (ts.isJsxSelfClosingElement(expr)) {
                 // Self-closing JSX has no text content
-                labelText = '';
-              } else if (ts.isTemplateExpression(expr) || ts.isNoSubstitutionTemplateLiteral(expr)) {
+                labelText = "";
+              } else if (
+                ts.isTemplateExpression(expr) ||
+                ts.isNoSubstitutionTemplateLiteral(expr)
+              ) {
                 labelText = expr.getText(sourceFile);
               }
             }
@@ -309,141 +622,352 @@ export function simulateScreenReader(sourceCode: string, fileName: string): Scre
         }
       }
       // Determine control type from the `control` prop (e.g. control={<Checkbox />})
-      let controlType = 'checkbox';
+      let controlType = "checkbox";
       for (const prop of node.attributes.properties) {
-        if (!ts.isJsxAttribute(prop) || prop.name.getText(sourceFile) !== 'control') { continue; }
-        if (prop.initializer && ts.isJsxExpression(prop.initializer) && prop.initializer.expression) {
+        if (
+          !ts.isJsxAttribute(prop) ||
+          prop.name.getText(sourceFile) !== "control"
+        ) {
+          continue;
+        }
+        if (
+          prop.initializer &&
+          ts.isJsxExpression(prop.initializer) &&
+          prop.initializer.expression
+        ) {
           const expr = prop.initializer.expression;
           if (ts.isJsxSelfClosingElement(expr)) {
             const ctrlTag = expr.tagName.getText(sourceFile).toLowerCase();
-            if (ctrlTag === 'radio') { controlType = 'radio'; }
-            else if (ctrlTag === 'switch') { controlType = 'switch'; }
-            else { controlType = ctrlTag; }
+            if (ctrlTag === "radio") {
+              controlType = "radio";
+            } else if (ctrlTag === "switch") {
+              controlType = "switch";
+            } else {
+              controlType = ctrlTag;
+            }
           }
         }
       }
       if (labelText) {
-        announcements.push({ element: `<${tagName}>`, role: role || controlType, accessibleName: labelText, announcement: `"${labelText}", ${controlType}${ariaStates}${descSuffix}`, line, column: character, hasIssue: false, category: 'form', description });
+        announcements.push({
+          element: `<${tagName}>`,
+          role: role || controlType,
+          accessibleName: labelText,
+          announcement: `"${labelText}", ${controlType}${ariaStates}${descSuffix}`,
+          line,
+          column: character,
+          hasIssue: false,
+          category: "form",
+          description,
+        });
       } else {
-        announcements.push({ element: `<${tagName}>`, role: role || controlType, accessibleName: '', announcement: `${controlType} (NO ACCESSIBLE NAME)`, line, column: character, hasIssue: true, issueMessage: 'FormControlLabel is missing its label prop', category: 'form' });
+        announcements.push({
+          element: `<${tagName}>`,
+          role: role || controlType,
+          accessibleName: "",
+          announcement: `${controlType} (NO ACCESSIBLE NAME)`,
+          line,
+          column: character,
+          hasIssue: true,
+          issueMessage: "FormControlLabel is missing its label prop",
+          category: "form",
+        });
       }
       return;
     }
 
     // ── Form inputs ──
-    if (tagLower === 'input' || tagLower === 'select' || tagLower === 'textarea' || LABEL_PROP_COMPONENTS.has(tagName)) {
-      const type = getAttr(node, 'type') || 'text';
-      const placeholder = getAttr(node, 'placeholder');
+    if (
+      tagLower === "input" ||
+      tagLower === "select" ||
+      tagLower === "textarea" ||
+      LABEL_PROP_COMPONENTS.has(tagName)
+    ) {
+      const type = getAttr(node, "type") || "text";
+      const placeholder = getAttr(node, "placeholder");
       const name = resolveFormLabel(node, tagName);
-      const inputType = tagLower === 'input' ? type
-        : LABEL_PROP_COMPONENTS.has(tagName) ? tagLower
-        : tagLower;
+      const inputType =
+        tagLower === "input"
+          ? type
+          : LABEL_PROP_COMPONENTS.has(tagName)
+            ? tagLower
+            : tagLower;
 
       if (name) {
-        const extra = placeholder && name !== placeholder ? `, placeholder: "${placeholder}"` : '';
-        announcements.push({ element: `<${tagName}>`, role: role || inputType, accessibleName: name, announcement: `"${name}", ${inputType}${extra}${ariaStates}${descSuffix}`, line, column: character, hasIssue: false, category: 'form', description });
+        const extra =
+          placeholder && name !== placeholder
+            ? `, placeholder: "${placeholder}"`
+            : "";
+        announcements.push({
+          element: `<${tagName}>`,
+          role: role || inputType,
+          accessibleName: name,
+          announcement: `"${name}", ${inputType}${extra}${ariaStates}${descSuffix}`,
+          line,
+          column: character,
+          hasIssue: false,
+          category: "form",
+          description,
+        });
       } else {
-        announcements.push({ element: `<${tagName}>`, role: role || inputType, accessibleName: '', announcement: `${inputType} (NO ACCESSIBLE NAME)`, line, column: character, hasIssue: true, issueMessage: `Form ${inputType} has no label — screen reader cannot identify it`, category: 'form' });
+        announcements.push({
+          element: `<${tagName}>`,
+          role: role || inputType,
+          accessibleName: "",
+          announcement: `${inputType} (NO ACCESSIBLE NAME)`,
+          line,
+          column: character,
+          hasIssue: true,
+          issueMessage: `Form ${inputType} has no label — screen reader cannot identify it`,
+          category: "form",
+        });
       }
       return;
     }
 
     // ── Tables ──
-    if (tagLower === 'table') {
+    if (tagLower === "table") {
       const name = computedName;
-      announcements.push({ element: `<${tagName}>`, role: role || 'table', accessibleName: name, announcement: name ? `"${name}", table` : 'table', line, column: character, hasIssue: false, category: 'table', description });
+      announcements.push({
+        element: `<${tagName}>`,
+        role: role || "table",
+        accessibleName: name,
+        announcement: name ? `"${name}", table` : "table",
+        line,
+        column: character,
+        hasIssue: false,
+        category: "table",
+        description,
+      });
       return;
     }
-    if (tagLower === 'caption') {
+    if (tagLower === "caption") {
       const name = computedName;
       if (name) {
-        announcements.push({ element: `<${tagName}>`, role: 'caption', accessibleName: name, announcement: `table caption: "${name}"`, line, column: character, hasIssue: false, category: 'table' });
+        announcements.push({
+          element: `<${tagName}>`,
+          role: "caption",
+          accessibleName: name,
+          announcement: `table caption: "${name}"`,
+          line,
+          column: character,
+          hasIssue: false,
+          category: "table",
+        });
       }
       return;
     }
-    if (tagLower === 'th') {
-      const scope = getAttr(node, 'scope');
+    if (tagLower === "th") {
+      const scope = getAttr(node, "scope");
       const name = computedName;
-      const scopeInfo = scope ? ` (${scope} header)` : '';
-      announcements.push({ element: `<${tagName}>`, role: role || 'columnheader', accessibleName: name, announcement: name ? `"${name}", column header${scopeInfo}` : `column header${scopeInfo} (EMPTY)`, line, column: character, hasIssue: !name, issueMessage: !name ? 'Table header is empty' : undefined, category: 'table' });
+      const scopeInfo = scope ? ` (${scope} header)` : "";
+      announcements.push({
+        element: `<${tagName}>`,
+        role: role || "columnheader",
+        accessibleName: name,
+        announcement: name
+          ? `"${name}", column header${scopeInfo}`
+          : `column header${scopeInfo} (EMPTY)`,
+        line,
+        column: character,
+        hasIssue: !name,
+        issueMessage: !name ? "Table header is empty" : undefined,
+        category: "table",
+      });
       return;
     }
 
     // ── Lists ──
-    if (tagLower === 'ul' || tagLower === 'ol') {
+    if (tagLower === "ul" || tagLower === "ol") {
       const name = computedName;
-      const listType = tagLower === 'ol' ? 'ordered list' : 'list';
+      const listType = tagLower === "ol" ? "ordered list" : "list";
       // Count <li> children
       let itemCount = 0;
       if (ts.isJsxOpeningElement(node) && ts.isJsxElement(node.parent)) {
         for (const child of node.parent.children) {
           if (ts.isJsxElement(child)) {
-            const childTag = child.openingElement.tagName.getText(sourceFile).toLowerCase();
-            if (childTag === 'li') { itemCount++; }
+            const childTag = child.openingElement.tagName
+              .getText(sourceFile)
+              .toLowerCase();
+            if (childTag === "li") {
+              itemCount++;
+            }
           }
         }
       }
-      const countInfo = itemCount > 0 ? `, ${itemCount} items` : '';
-      announcements.push({ element: `<${tagName}>`, role: role || 'list', accessibleName: name, announcement: name ? `"${name}", ${listType}${countInfo}` : `${listType}${countInfo}`, line, column: character, hasIssue: false, category: 'list', description });
+      const countInfo = itemCount > 0 ? `, ${itemCount} items` : "";
+      announcements.push({
+        element: `<${tagName}>`,
+        role: role || "list",
+        accessibleName: name,
+        announcement: name
+          ? `"${name}", ${listType}${countInfo}`
+          : `${listType}${countInfo}`,
+        line,
+        column: character,
+        hasIssue: false,
+        category: "list",
+        description,
+      });
       return;
     }
-    if (tagLower === 'li') {
+    if (tagLower === "li") {
       const name = computedName;
       if (name) {
-        announcements.push({ element: `<${tagName}>`, role: role || 'listitem', accessibleName: name, announcement: `"${name}", list item`, line, column: character, hasIssue: false, category: 'list' });
+        announcements.push({
+          element: `<${tagName}>`,
+          role: role || "listitem",
+          accessibleName: name,
+          announcement: `"${name}", list item`,
+          line,
+          column: character,
+          hasIssue: false,
+          category: "list",
+        });
       }
       return;
     }
 
     // ── Dialog / Modal ──
-    if (tagLower === 'dialog' || role === 'dialog' || role === 'alertdialog') {
+    if (tagLower === "dialog" || role === "dialog" || role === "alertdialog") {
       const name = computedName;
-      const dialogRole = role || 'dialog';
+      const dialogRole = role || "dialog";
       if (name) {
-        announcements.push({ element: `<${tagName}>`, role: dialogRole, accessibleName: name, announcement: `"${name}", ${dialogRole}${descSuffix}`, line, column: character, hasIssue: false, category: 'landmark', description });
+        announcements.push({
+          element: `<${tagName}>`,
+          role: dialogRole,
+          accessibleName: name,
+          announcement: `"${name}", ${dialogRole}${descSuffix}`,
+          line,
+          column: character,
+          hasIssue: false,
+          category: "landmark",
+          description,
+        });
       } else {
-        announcements.push({ element: `<${tagName}>`, role: dialogRole, accessibleName: '', announcement: `${dialogRole} (NO ACCESSIBLE NAME)`, line, column: character, hasIssue: true, issueMessage: 'Dialog should have an accessible name via aria-label or aria-labelledby', category: 'landmark' });
+        announcements.push({
+          element: `<${tagName}>`,
+          role: dialogRole,
+          accessibleName: "",
+          announcement: `${dialogRole} (NO ACCESSIBLE NAME)`,
+          line,
+          column: character,
+          hasIssue: true,
+          issueMessage:
+            "Dialog should have an accessible name via aria-label or aria-labelledby",
+          category: "landmark",
+        });
       }
       return;
     }
 
     // ── Details / Summary ──
-    if (tagLower === 'summary') {
+    if (tagLower === "summary") {
       const name = computedName;
       if (name) {
-        announcements.push({ element: `<${tagName}>`, role: 'button', accessibleName: name, announcement: `"${name}", disclosure triangle, collapsed`, line, column: character, hasIssue: false, category: 'interactive' });
+        announcements.push({
+          element: `<${tagName}>`,
+          role: "button",
+          accessibleName: name,
+          announcement: `"${name}", disclosure triangle, collapsed`,
+          line,
+          column: character,
+          hasIssue: false,
+          category: "interactive",
+        });
       }
       return;
     }
-    if (tagLower === 'details') {
-      announcements.push({ element: `<${tagName}>`, role: 'group', accessibleName: computedName, announcement: computedName ? `"${computedName}", details group` : 'details group', line, column: character, hasIssue: false, category: 'other' });
+    if (tagLower === "details") {
+      announcements.push({
+        element: `<${tagName}>`,
+        role: "group",
+        accessibleName: computedName,
+        announcement: computedName
+          ? `"${computedName}", details group`
+          : "details group",
+        line,
+        column: character,
+        hasIssue: false,
+        category: "other",
+      });
       return;
     }
 
     // ── Fieldset / Legend ──
-    if (tagLower === 'fieldset') {
+    if (tagLower === "fieldset") {
       const name = computedName;
-      announcements.push({ element: `<${tagName}>`, role: role || 'group', accessibleName: name, announcement: name ? `"${name}", group` : 'group', line, column: character, hasIssue: !name, issueMessage: !name ? 'Fieldset should have a <legend> or aria-label' : undefined, category: 'form', description });
+      announcements.push({
+        element: `<${tagName}>`,
+        role: role || "group",
+        accessibleName: name,
+        announcement: name ? `"${name}", group` : "group",
+        line,
+        column: character,
+        hasIssue: !name,
+        issueMessage: !name
+          ? "Fieldset should have a <legend> or aria-label"
+          : undefined,
+        category: "form",
+        description,
+      });
       return;
     }
-    if (tagLower === 'legend') {
+    if (tagLower === "legend") {
       const name = computedName;
       if (name) {
-        announcements.push({ element: `<${tagName}>`, role: 'legend', accessibleName: name, announcement: `group label: "${name}"`, line, column: character, hasIssue: false, category: 'form' });
+        announcements.push({
+          element: `<${tagName}>`,
+          role: "legend",
+          accessibleName: name,
+          announcement: `group label: "${name}"`,
+          line,
+          column: character,
+          hasIssue: false,
+          category: "form",
+        });
       }
       return;
     }
 
     // ── Live regions ──
-    const ariaLive = getAttr(node, 'aria-live');
-    if (ariaLive && ariaLive !== 'off') {
+    const ariaLive = getAttr(node, "aria-live");
+    if (ariaLive && ariaLive !== "off") {
       const name = computedName;
-      announcements.push({ element: `<${tagName}>`, role: role || `${ariaLive} live region`, accessibleName: name, announcement: name ? `live region (${ariaLive}): "${name}"` : `live region (${ariaLive})`, line, column: character, hasIssue: false, category: 'live-region', description });
+      announcements.push({
+        element: `<${tagName}>`,
+        role: role || `${ariaLive} live region`,
+        accessibleName: name,
+        announcement: name
+          ? `live region (${ariaLive}): "${name}"`
+          : `live region (${ariaLive})`,
+        line,
+        column: character,
+        hasIssue: false,
+        category: "live-region",
+        description,
+      });
       return;
     }
-    if (role === 'alert' || role === 'status' || role === 'log' || role === 'timer' || role === 'marquee') {
+    if (
+      role === "alert" ||
+      role === "status" ||
+      role === "log" ||
+      role === "timer" ||
+      role === "marquee"
+    ) {
       const name = computedName;
-      announcements.push({ element: `<${tagName}>`, role, accessibleName: name, announcement: name ? `"${name}", ${role}` : role, line, column: character, hasIssue: false, category: 'live-region', description });
+      announcements.push({
+        element: `<${tagName}>`,
+        role,
+        accessibleName: name,
+        announcement: name ? `"${name}", ${role}` : role,
+        line,
+        column: character,
+        hasIssue: false,
+        category: "live-region",
+        description,
+      });
       return;
     }
 
@@ -451,11 +975,33 @@ export function simulateScreenReader(sourceCode: string, fileName: string): Scre
     if (LANDMARK_ELEMENTS[tagLower]) {
       const landmark = LANDMARK_ELEMENTS[tagLower];
       const name = computedName;
-      const needsLabel = tagLower === 'section' || tagLower === 'form';
+      const needsLabel = tagLower === "section" || tagLower === "form";
       if (name) {
-        announcements.push({ element: `<${tagName}>`, role: landmark, accessibleName: name, announcement: `"${name}", ${landmark} landmark`, line, column: character, hasIssue: false, category: 'landmark', description });
+        announcements.push({
+          element: `<${tagName}>`,
+          role: landmark,
+          accessibleName: name,
+          announcement: `"${name}", ${landmark} landmark`,
+          line,
+          column: character,
+          hasIssue: false,
+          category: "landmark",
+          description,
+        });
       } else {
-        announcements.push({ element: `<${tagName}>`, role: landmark, accessibleName: '', announcement: `${landmark} landmark`, line, column: character, hasIssue: needsLabel, issueMessage: needsLabel ? `<${tagLower}> landmark should have an aria-label` : undefined, category: 'landmark' });
+        announcements.push({
+          element: `<${tagName}>`,
+          role: landmark,
+          accessibleName: "",
+          announcement: `${landmark} landmark`,
+          line,
+          column: character,
+          hasIssue: needsLabel,
+          issueMessage: needsLabel
+            ? `<${tagLower}> landmark should have an aria-label`
+            : undefined,
+          category: "landmark",
+        });
       }
       return;
     }
@@ -463,20 +1009,47 @@ export function simulateScreenReader(sourceCode: string, fileName: string): Scre
     // ── Elements with explicit role ──
     if (role) {
       const name = computedName;
-      announcements.push({ element: `<${tagName}>`, role, accessibleName: name, announcement: name ? `"${name}", ${role}${ariaStates}${descSuffix}` : `${role} (no accessible name)${ariaStates}`, line, column: character, hasIssue: !name, issueMessage: !name ? `Element with role="${role}" should have an accessible name` : undefined, category: 'other', description });
+      announcements.push({
+        element: `<${tagName}>`,
+        role,
+        accessibleName: name,
+        announcement: name
+          ? `"${name}", ${role}${ariaStates}${descSuffix}`
+          : `${role} (no accessible name)${ariaStates}`,
+        line,
+        column: character,
+        hasIssue: !name,
+        issueMessage: !name
+          ? `Element with role="${role}" should have an accessible name`
+          : undefined,
+        category: "other",
+        description,
+      });
       return;
     }
 
     // ── Elements with aria-label but no role ──
     if (ariaLabel) {
-      announcements.push({ element: `<${tagName}>`, role: 'generic', accessibleName: ariaLabel, announcement: `"${ariaLabel}"${descSuffix}`, line, column: character, hasIssue: false, category: 'other', description });
+      announcements.push({
+        element: `<${tagName}>`,
+        role: "generic",
+        accessibleName: ariaLabel,
+        announcement: `"${ariaLabel}"${descSuffix}`,
+        line,
+        column: character,
+        hasIssue: false,
+        category: "other",
+        description,
+      });
     }
   }
 
   function visit(node: ts.Node): void {
     if (ts.isJsxSelfClosingElement(node) || ts.isJsxOpeningElement(node)) {
       // Skip entire subtree if aria-hidden
-      if (isAriaHidden(node)) { return; }
+      if (isAriaHidden(node)) {
+        return;
+      }
       process(node);
     }
     ts.forEachChild(node, visit);
@@ -489,7 +1062,13 @@ export function simulateScreenReader(sourceCode: string, fileName: string): Scre
 /* ── Tab Order Simulation ──────────────────────────────────────────────── */
 
 const FOCUSABLE_ELEMENTS = new Set([
-  'a', 'button', 'input', 'select', 'textarea', 'details', 'summary',
+  "a",
+  "button",
+  "input",
+  "select",
+  "textarea",
+  "details",
+  "summary",
 ]);
 
 /**
@@ -498,10 +1077,19 @@ const FOCUSABLE_ELEMENTS = new Set([
  * come first (sorted ascending), then tabIndex=0 and natively focusable
  * elements in source order. Elements with tabIndex=-1 are skipped.
  */
-export function simulateTabOrder(sourceCode: string, fileName: string): TabStop[] {
-  const isTsx = fileName.endsWith('.tsx') || fileName.endsWith('.jsx') || fileName.endsWith('.html');
+export function simulateTabOrder(
+  sourceCode: string,
+  fileName: string,
+): TabStop[] {
+  const isTsx =
+    fileName.endsWith(".tsx") ||
+    fileName.endsWith(".jsx") ||
+    fileName.endsWith(".html");
   const sourceFile = ts.createSourceFile(
-    fileName, sourceCode, ts.ScriptTarget.Latest, true,
+    fileName,
+    sourceCode,
+    ts.ScriptTarget.Latest,
+    true,
     isTsx ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
   );
 
@@ -512,9 +1100,15 @@ export function simulateTabOrder(sourceCode: string, fileName: string): TabStop[
     name: string,
   ): string | undefined {
     for (const prop of node.attributes.properties) {
-      if (!ts.isJsxAttribute(prop) || prop.name.getText(sourceFile) !== name) { continue; }
-      if (!prop.initializer) { return ''; }
-      if (ts.isStringLiteral(prop.initializer)) { return prop.initializer.text; }
+      if (!ts.isJsxAttribute(prop) || prop.name.getText(sourceFile) !== name) {
+        continue;
+      }
+      if (!prop.initializer) {
+        return "";
+      }
+      if (ts.isStringLiteral(prop.initializer)) {
+        return prop.initializer.text;
+      }
       if (ts.isJsxExpression(prop.initializer) && prop.initializer.expression) {
         if (ts.isStringLiteral(prop.initializer.expression)) {
           return prop.initializer.expression.text;
@@ -528,10 +1122,19 @@ export function simulateTabOrder(sourceCode: string, fileName: string): TabStop[
     return undefined;
   }
 
-  function getTabIndex(node: ts.JsxSelfClosingElement | ts.JsxOpeningElement): number | undefined {
+  function getTabIndex(
+    node: ts.JsxSelfClosingElement | ts.JsxOpeningElement,
+  ): number | undefined {
     for (const prop of node.attributes.properties) {
-      if (!ts.isJsxAttribute(prop) || prop.name.getText(sourceFile) !== 'tabIndex') { continue; }
-      if (!prop.initializer) { return 0; }
+      if (
+        !ts.isJsxAttribute(prop) ||
+        prop.name.getText(sourceFile) !== "tabIndex"
+      ) {
+        continue;
+      }
+      if (!prop.initializer) {
+        return 0;
+      }
       if (ts.isStringLiteral(prop.initializer)) {
         const n = parseInt(prop.initializer.text, 10);
         return isNaN(n) ? undefined : n;
@@ -540,9 +1143,11 @@ export function simulateTabOrder(sourceCode: string, fileName: string): TabStop[
         if (ts.isNumericLiteral(prop.initializer.expression)) {
           return Number(prop.initializer.expression.text);
         }
-        if (ts.isPrefixUnaryExpression(prop.initializer.expression) &&
-            prop.initializer.expression.operator === ts.SyntaxKind.MinusToken &&
-            ts.isNumericLiteral(prop.initializer.expression.operand)) {
+        if (
+          ts.isPrefixUnaryExpression(prop.initializer.expression) &&
+          prop.initializer.expression.operator === ts.SyntaxKind.MinusToken &&
+          ts.isNumericLiteral(prop.initializer.expression.operand)
+        ) {
           return -Number(prop.initializer.expression.operand.text);
         }
       }
@@ -557,11 +1162,13 @@ export function simulateTabOrder(sourceCode: string, fileName: string): TabStop[
       const tagLower = tagName.toLowerCase();
 
       // Check aria-hidden
-      const ariaHidden = getAttrVal(node, 'aria-hidden');
-      if (ariaHidden === 'true' || ariaHidden === '') { return; }
+      const ariaHidden = getAttrVal(node, "aria-hidden");
+      if (ariaHidden === "true" || ariaHidden === "") {
+        return;
+      }
 
       // Check if disabled
-      const disabled = getAttrVal(node, 'disabled');
+      const disabled = getAttrVal(node, "disabled");
       if (disabled !== undefined) {
         ts.forEachChild(node, visit);
         return;
@@ -571,9 +1178,9 @@ export function simulateTabOrder(sourceCode: string, fileName: string): TabStop[
       const isNativelyFocusable = FOCUSABLE_ELEMENTS.has(tagLower);
 
       // Skip hidden inputs
-      if (tagLower === 'input') {
-        const type = getAttrVal(node, 'type');
-        if (type === 'hidden') {
+      if (tagLower === "input") {
+        const type = getAttrVal(node, "type");
+        if (type === "hidden") {
           ts.forEachChild(node, visit);
           return;
         }
@@ -582,54 +1189,86 @@ export function simulateTabOrder(sourceCode: string, fileName: string): TabStop[
       // Determine if this element is in the tab order
       let tabIndex: number | undefined;
       if (explicitTabIndex !== undefined) {
-        if (explicitTabIndex >= 0) { tabIndex = explicitTabIndex; }
+        if (explicitTabIndex >= 0) {
+          tabIndex = explicitTabIndex;
+        }
         // tabIndex = -1 → not in tab order
       } else if (isNativelyFocusable) {
         // <a> only if it has href
-        if (tagLower === 'a') {
-          const href = getAttrVal(node, 'href');
-          if (href !== undefined) { tabIndex = 0; }
+        if (tagLower === "a") {
+          const href = getAttrVal(node, "href");
+          if (href !== undefined) {
+            tabIndex = 0;
+          }
         } else {
           tabIndex = 0;
         }
       }
 
       if (tabIndex !== undefined && tabIndex >= 0) {
-        const { line, character } = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile));
-        const ariaLabel = getAttrVal(node, 'aria-label');
-        const role = getAttrVal(node, 'role');
-        let accessibleName = ariaLabel || '';
+        const { line, character } = sourceFile.getLineAndCharacterOfPosition(
+          node.getStart(sourceFile),
+        );
+        const ariaLabel = getAttrVal(node, "aria-label");
+        const role = getAttrVal(node, "role");
+        let accessibleName = ariaLabel || "";
 
         // Try to get text content for named elements
-        if (!accessibleName && ts.isJsxOpeningElement(node) && ts.isJsxElement(node.parent)) {
+        if (
+          !accessibleName &&
+          ts.isJsxOpeningElement(node) &&
+          ts.isJsxElement(node.parent)
+        ) {
           const parts: string[] = [];
           for (const child of node.parent.children) {
             if (ts.isJsxText(child)) {
               const t = child.getText(sourceFile).trim();
-              if (t) { parts.push(t); }
+              if (t) {
+                parts.push(t);
+              }
             }
           }
-          accessibleName = parts.join(' ').replace(/\s+/g, ' ').trim();
+          accessibleName = parts.join(" ").replace(/\s+/g, " ").trim();
         }
 
         // Determine role
-        let inferredRole = role || '';
+        let inferredRole = role || "";
         if (!inferredRole) {
-          if (tagLower === 'a') { inferredRole = 'link'; }
-          else if (tagLower === 'button' || tagLower === 'summary') { inferredRole = 'button'; }
-          else if (tagLower === 'input') {
-            const type = getAttrVal(node, 'type') || 'text';
-            if (type === 'checkbox') { inferredRole = 'checkbox'; }
-            else if (type === 'radio') { inferredRole = 'radio'; }
-            else if (type === 'submit' || type === 'reset' || type === 'button') { inferredRole = 'button'; }
-            else { inferredRole = 'textbox'; }
+          if (tagLower === "a") {
+            inferredRole = "link";
+          } else if (tagLower === "button" || tagLower === "summary") {
+            inferredRole = "button";
+          } else if (tagLower === "input") {
+            const type = getAttrVal(node, "type") || "text";
+            if (type === "checkbox") {
+              inferredRole = "checkbox";
+            } else if (type === "radio") {
+              inferredRole = "radio";
+            } else if (
+              type === "submit" ||
+              type === "reset" ||
+              type === "button"
+            ) {
+              inferredRole = "button";
+            } else {
+              inferredRole = "textbox";
+            }
+          } else if (tagLower === "select") {
+            inferredRole = "combobox";
+          } else if (tagLower === "textarea") {
+            inferredRole = "textbox";
+          } else {
+            inferredRole = tagLower;
           }
-          else if (tagLower === 'select') { inferredRole = 'combobox'; }
-          else if (tagLower === 'textarea') { inferredRole = 'textbox'; }
-          else { inferredRole = tagLower; }
         }
 
-        const hasIssue = tabIndex > 0 || (!accessibleName && isNativelyFocusable && tagLower !== 'input' && tagLower !== 'textarea' && tagLower !== 'select');
+        const hasIssue =
+          tabIndex > 0 ||
+          (!accessibleName &&
+            isNativelyFocusable &&
+            tagLower !== "input" &&
+            tagLower !== "textarea" &&
+            tagLower !== "select");
 
         stops.push({
           element: `<${tagName}>`,
@@ -639,9 +1278,12 @@ export function simulateTabOrder(sourceCode: string, fileName: string): TabStop[
           column: character,
           tabIndex,
           hasIssue,
-          issueMessage: tabIndex > 0
-            ? `Positive tabIndex (${tabIndex}) disrupts natural tab order`
-            : (!accessibleName && hasIssue ? 'Focusable element has no accessible name' : undefined),
+          issueMessage:
+            tabIndex > 0
+              ? `Positive tabIndex (${tabIndex}) disrupts natural tab order`
+              : !accessibleName && hasIssue
+                ? "Focusable element has no accessible name"
+                : undefined,
         });
       }
     }
@@ -652,9 +1294,15 @@ export function simulateTabOrder(sourceCode: string, fileName: string): TabStop[
 
   // Sort: positive tabIndex first (ascending), then tabIndex=0 in source order
   stops.sort((a, b) => {
-    if (a.tabIndex > 0 && b.tabIndex > 0) { return a.tabIndex - b.tabIndex; }
-    if (a.tabIndex > 0) { return -1; }
-    if (b.tabIndex > 0) { return 1; }
+    if (a.tabIndex > 0 && b.tabIndex > 0) {
+      return a.tabIndex - b.tabIndex;
+    }
+    if (a.tabIndex > 0) {
+      return -1;
+    }
+    if (b.tabIndex > 0) {
+      return 1;
+    }
     return 0; // preserve source order for tabIndex=0
   });
 

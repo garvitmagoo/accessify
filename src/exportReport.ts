@@ -3,6 +3,11 @@ import type { A11yIssue } from './types';
 import { parallelScan } from './parallelScanner';
 import { loadConfig, applyConfig, isExcluded } from './config';
 
+// package.json lives outside the TS rootDir, so a static JSON import isn't
+// possible; read the version once at module load instead.
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const EXTENSION_VERSION: string = require('../package.json').version;
+
 /**
  * SARIF (Static Analysis Results Interchange Format) v2.1.0 exporter.
  * Produces output consumable by:
@@ -69,12 +74,15 @@ const RULE_METADATA: Record<string, { description: string; wcag?: string }> = {
   'autocomplete-valid': { description: 'Input fields collecting personal data must have autocomplete', wcag: '1.3.5' },
   'no-mouse-only-hover': { description: 'Hover content must also be keyboard-accessible', wcag: '1.4.13' },
   'nextjs-head-lang': { description: 'Next.js Html element must have a lang attribute', wcag: '3.1.1' },
-  'nextjs-image-alt': { description: 'Next.js Image component must have alt text', wcag: '1.1.1' },
   'nextjs-link-text': { description: 'Next.js Link component must have discernible text', wcag: '1.1.1' },
   'no-autofocus': { description: 'Avoid autoFocus — it reduces usability for sighted and non-sighted users', wcag: '2.4.3' },
   'interactive-supports-focus': { description: 'Interactive elements must be focusable for keyboard users', wcag: '2.1.1' },
   'no-noninteractive-element-interactions': { description: 'Non-interactive elements should not have event handlers — use interactive elements instead', wcag: '4.1.2' },
   'svg-has-accessible-name': { description: 'SVG elements must have an accessible name via title, aria-label, or aria-labelledby', wcag: '1.1.1' },
+  'no-target-blank-noopener': { description: 'target="_blank" links must set rel="noopener noreferrer"', wcag: '4.1.2' },
+  'no-autoplay-media': { description: 'Autoplaying media must be muted or expose controls', wcag: '1.4.2' },
+  'no-duplicate-id': { description: 'IDs must be unique within a document', wcag: '4.1.1' },
+  'aria-valid-ref': { description: 'ARIA id references must point to existing elements', wcag: '1.3.1' },
 };
 
 /* ── Export commands ────────────────────────────────────────────────────── */
@@ -205,7 +213,7 @@ function buildSarif(scan: ScanResult): SarifLog {
       tool: {
         driver: {
           name: 'Accessify',
-          version: require('../package.json').version,
+          version: EXTENSION_VERSION,
           informationUri: 'https://github.com/garvit-magoo/accessify',
           rules,
         },
@@ -257,7 +265,7 @@ function buildJsonReport(scan: ScanResult): object {
 
   return {
     tool: 'Accessify',
-    version: require('../package.json').version,
+    version: EXTENSION_VERSION,
     scannedAt: scan.scannedAt,
     summary: {
       totalIssues: scan.totalIssues,

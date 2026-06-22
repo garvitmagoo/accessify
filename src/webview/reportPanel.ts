@@ -436,7 +436,6 @@ export class A11yReportPanel {
       'autocomplete-valid':              { level: 'AA', principle: 'Perceivable' },
       'no-mouse-only-hover':             { level: 'AA', principle: 'Perceivable' },
       'nextjs-head-lang':                { level: 'A',  principle: 'Understandable' },
-      'nextjs-image-alt':                { level: 'A',  principle: 'Perceivable' },
       'nextjs-link-text':                { level: 'A',  principle: 'Perceivable' },
       'no-autofocus':                    { level: 'A',  principle: 'Operable' },
       'interactive-supports-focus':       { level: 'A',  principle: 'Operable' },
@@ -447,8 +446,11 @@ export class A11yReportPanel {
       'label-has-associated-control':        { level: 'A',  principle: 'Perceivable' },
       'media-has-caption':                   { level: 'A',  principle: 'Perceivable' },
       'page-title':                          { level: 'A',  principle: 'Operable' },
-      'prefer-semantic-elements':            { level: 'A',  principle: 'Robust' },
       'skip-link':                           { level: 'A',  principle: 'Operable' },
+      'no-target-blank-noopener':            { level: 'A',  principle: 'Robust' },
+      'no-autoplay-media':                   { level: 'A',  principle: 'Perceivable' },
+      'no-duplicate-id':                     { level: 'A',  principle: 'Robust' },
+      'aria-valid-ref':                      { level: 'A',  principle: 'Perceivable' },
     };
 
     const severityMultiplier: Record<string, number> = {

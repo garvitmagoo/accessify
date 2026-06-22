@@ -18,6 +18,7 @@ import {
   findOpeningTagClose,
   computeSafeReplacement,
   escapeRegExp,
+  findFabricatedAttribute,
 } from './jsx/utils';
 
 /** Find the closing `>` or `/>` of a multiline JSX opening tag. */
@@ -40,7 +41,7 @@ function findOpeningTagCloseMultiline(
 
       if (!pastTagName) {
         if (ch === '<') { continue; }
-        if (/[a-zA-Z0-9._\-]/.test(ch)) { continue; }
+        if (/[a-zA-Z0-9._-]/.test(ch)) { continue; }
         pastTagName = true;
       }
 
@@ -72,8 +73,43 @@ function findOpeningTagCloseMultiline(
  * Extract the attribute name from an attribute string like `aria-label="value"`.
  */
 function extractAttrName(attribute: string): string {
-  const match = attribute.match(/^([a-zA-Z][a-zA-Z0-9\-]*)/);
+  const match = attribute.match(/^([a-zA-Z][a-zA-Z0-9-]*)/);
   return match ? match[1] : attribute;
+}
+
+/**
+ * Detect if the AI fix introduced a syntax-breaking change to attribute patterns.
+ * Catches cases like: className="..." → className={...} (missing quotes)
+ * or className="..." being removed/split incorrectly.
+ */
+function hasAttributeSyntaxBreak(original: string, replacement: string): boolean {
+  // Extract attribute assignments from both: name="value" or name='value' or name={value}
+  const attrPattern = /([a-zA-Z][\w-]*)=("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|\{)/g;
+
+  const origAttrs = new Map<string, string>();
+  let m: RegExpExecArray | null;
+  while ((m = attrPattern.exec(original)) !== null) {
+    // Store the quote style: '"', "'", or '{'
+    origAttrs.set(m[1], m[2][0]);
+  }
+
+  attrPattern.lastIndex = 0;
+  while ((m = attrPattern.exec(replacement)) !== null) {
+    const name = m[1];
+    const newStyle = m[2][0];
+    const origStyle = origAttrs.get(name);
+    // If the attribute existed in original with quotes but now uses braces (or vice versa)
+    // and it's a common string attribute, that's likely a break.
+    if (origStyle && origStyle !== newStyle) {
+      // Changing from string to expression or vice versa on these attrs is almost always wrong
+      const stringOnlyAttrs = new Set(['className', 'class', 'id', 'href', 'src', 'alt', 'title', 'placeholder', 'name', 'type', 'rel']);
+      if (stringOnlyAttrs.has(name) && (origStyle === '"' || origStyle === "'") && newStyle === '{') {
+        return true;
+      }
+    }
+  }
+
+  return false;
 }
 
 /**
@@ -186,12 +222,14 @@ export class A11yCodeActionProvider implements vscode.CodeActionProvider {
         actions.push(staticFix);
       }
 
-      // Add an AI-powered fix option — skip for rules where the static fix is complete
-      // and the AI has no structured action type to express the change (e.g. inline style values).
-      const STATIC_ONLY_RULES = new Set(['color-contrast', 'no-autofocus', 'heading-order']);
+      // Add an AI-powered fix option — skip for rules where the static fix is always complete
+      // and the AI has no structured action type to express the change.
+      // Also skip AI for color-contrast when a static fix was found (AI tends to mangle className syntax).
+      const STATIC_ONLY_RULES = new Set(['no-autofocus', 'heading-order']);
       const rule = getRuleId(diagnostic);
+      const skipAi = STATIC_ONLY_RULES.has(rule) || (rule === 'color-contrast' && staticFix !== null);
       const config = vscode.workspace.getConfiguration('a11y');
-      if (config.get<string>('aiProvider', 'none') !== 'none' && !STATIC_ONLY_RULES.has(rule)) {
+      if (config.get<string>('aiProvider', 'none') !== 'none' && !skipAi) {
         const aiFix = new vscode.CodeAction(
           `Accessify: AI Fix - ${diagnostic.message}`,
           vscode.CodeActionKind.QuickFix,
@@ -269,12 +307,36 @@ export class A11yCodeActionProvider implements vscode.CodeActionProvider {
             'Add aria-expanded attribute',
           );
         }
-        if (msg.includes('aria-controls') || msg.includes('aria-selected')) {
+        if (msg.includes('aria-checked')) {
+          return this.createInsertAttributeFix(
+            document,
+            diagnostic,
+            'aria-checked={false}',
+            'Add aria-checked attribute',
+          );
+        }
+        if (msg.includes('aria-valuenow')) {
+          return this.createInsertAttributesFix(
+            document,
+            diagnostic,
+            ['aria-valuenow={0}', 'aria-valuemin={0}', 'aria-valuemax={100}'],
+            'Add aria-valuenow/min/max attributes',
+          );
+        }
+        if (msg.includes('aria-controls')) {
           return this.createInsertAttributesFix(
             document,
             diagnostic,
             ['aria-controls=""', 'aria-selected={false}'],
             'Add aria-controls and aria-selected',
+          );
+        }
+        if (msg.includes('aria-selected')) {
+          return this.createInsertAttributeFix(
+            document,
+            diagnostic,
+            'aria-selected={false}',
+            'Add aria-selected attribute',
           );
         }
         return null;
@@ -353,15 +415,6 @@ export class A11yCodeActionProvider implements vscode.CodeActionProvider {
         return null;
       }
 
-      case 'nextjs-image-alt': {
-        return this.createInsertAttributeFix(
-          document,
-          diagnostic,
-          'alt=""',
-          'Add alt attribute to Next.js Image',
-        );
-      }
-
       case 'nextjs-head-lang': {
         return this.createInsertAttributeFix(
           document,
@@ -417,10 +470,17 @@ export class A11yCodeActionProvider implements vscode.CodeActionProvider {
       }
 
       case 'page-title': {
+        // Derive a meaningful title from the filename (e.g. "about.tsx" → "About")
+        const baseName = document.fileName.replace(/.*[/\\]/, '').replace(/\.(tsx?|jsx?)$/, '');
+        const pageTitle = baseName
+          .replace(/[-_]/g, ' ')
+          .replace(/([a-z])([A-Z])/g, '$1 $2')
+          .replace(/\b\w/g, c => c.toUpperCase())
+          || 'Page Title';
         return this.createInsertChildElementFix(
           document,
           diagnostic,
-          '<title>Page Title</title>',
+          `<title>${pageTitle}</title>`,
           'Add <title> to <Head>',
         );
       }
@@ -476,6 +536,24 @@ export class A11yCodeActionProvider implements vscode.CodeActionProvider {
           diagnostic,
           ['onFocus={() => {}}', 'onBlur={() => {}}'],
           'Add onFocus/onBlur to match mouse hover handlers',
+        );
+      }
+
+      case 'no-target-blank-noopener': {
+        return this.createInsertAttributeFix(
+          document,
+          diagnostic,
+          'rel="noopener noreferrer"',
+          'Add rel="noopener noreferrer"',
+        );
+      }
+
+      case 'no-autoplay-media': {
+        return this.createInsertAttributeFix(
+          document,
+          diagnostic,
+          'muted',
+          'Add muted attribute',
         );
       }
 
@@ -829,11 +907,13 @@ export async function applyAiFixCommand(uri: vscode.Uri, diagnostic: vscode.Diag
   const diagCol = diagnostic.range.start.character;
 
   const tagSpan = findJsxOpeningTagSpan(document, diagLine, diagCol);
+  const spanStartLine = tagSpan.startLine;
+  let spanEndLine = tagSpan.endLine;
   const tagLines: string[] = [];
-  for (let i = tagSpan.startLine; i <= tagSpan.endLine; i++) {
+  for (let i = spanStartLine; i <= spanEndLine; i++) {
     tagLines.push(document.lineAt(i).text);
   }
-  const tagText = tagLines.join('\n');
+  let tagText = tagLines.join('\n');
 
   const ctxStart = Math.max(0, tagSpan.startLine - 5);
   const ctxEnd = Math.min(document.lineCount - 1, tagSpan.endLine + 10);
@@ -856,11 +936,15 @@ export async function applyAiFixCommand(uri: vscode.Uri, diagnostic: vscode.Diag
     {
       location: vscode.ProgressLocation.Notification,
       title: 'Accessify: Generating AI fix...',
-      cancellable: false,
+      cancellable: true,
     },
-    async () => {
-      const fix = await getAiFix(tagText, issue, surroundingContext);
-      if (!fix) {
+    async (_progress, token) => {
+      // Wire VS Code cancellation token to an AbortController
+      const abortController = new AbortController();
+      token.onCancellationRequested(() => abortController.abort());
+
+      const fix = await getAiFix(tagText, issue, surroundingContext, abortController.signal);
+      if (!fix || token.isCancellationRequested) {
         return;
       }
 
@@ -873,9 +957,40 @@ export async function applyAiFixCommand(uri: vscode.Uri, diagnostic: vscode.Diag
 
       // 1. Preferred: apply structured actions (deterministic, no formatting issues)
       if (fix.actions && fix.actions.length > 0) {
+        // If any action is replaceTag, expand the span to include the closing tag
+        const replaceTagAction = fix.actions.find(a => a.type === 'replaceTag');
+        if (replaceTagAction && replaceTagAction.type === 'replaceTag') {
+          const oldTag = replaceTagAction.oldTag;
+          const closePattern = `</${oldTag}>`;
+          // Search forward from the opening tag's end to find the closing tag
+          for (let i = spanEndLine; i < document.lineCount; i++) {
+            const lineText = document.lineAt(i).text;
+            if (lineText.includes(closePattern)) {
+              // Expand tagText and span to include everything up to and including the closing tag
+              const extraLines: string[] = [];
+              for (let j = spanEndLine + 1; j <= i; j++) {
+                extraLines.push(document.lineAt(j).text);
+              }
+              if (extraLines.length > 0) {
+                tagText = tagText + '\n' + extraLines.join('\n');
+                spanEndLine = i;
+              }
+              break;
+            }
+          }
+        }
+
         finalReplacement = applyActions(tagText, fix.actions);
         if (!finalReplacement || finalReplacement.trim() === tagText.trim()) {
           finalReplacement = null; // actions failed or no change, try next
+        }
+        // Reject if actions broke attribute syntax
+        if (finalReplacement && hasAttributeSyntaxBreak(tagText, finalReplacement)) {
+          finalReplacement = null;
+        }
+        // Reject if actions fabricated attributes not in original code
+        if (finalReplacement && findFabricatedAttribute(tagText, finalReplacement)) {
+          finalReplacement = null;
         }
       }
 
@@ -885,14 +1000,10 @@ export async function applyAiFixCommand(uri: vscode.Uri, diagnostic: vscode.Diag
         const noChange = safeReplacement.trim() === tagText.trim();
         let invalidJsx = false;
         if (!noChange) {
-          const safeTrimmed = safeReplacement.trim();
-          const isOpeningOnly = safeTrimmed.endsWith('>') && !safeTrimmed.endsWith('/>') && !safeReplacement.includes('</');
-          if (!isOpeningOnly) {
-            const syntaxCheck = validateJsxSyntax(safeReplacement);
-            invalidJsx = !syntaxCheck.valid;
-          }
+          const syntaxCheck = validateJsxSyntax(safeReplacement);
+          invalidJsx = !syntaxCheck.valid;
         }
-        if (!noChange && !invalidJsx) {
+        if (!noChange && !invalidJsx && !hasAttributeSyntaxBreak(tagText, safeReplacement) && !findFabricatedAttribute(tagText, safeReplacement)) {
           finalReplacement = safeReplacement;
         }
       }
@@ -922,8 +1033,8 @@ export async function applyAiFixCommand(uri: vscode.Uri, diagnostic: vscode.Diag
 
       const change: A11yChange = {
         id: 1,
-        startLine: tagSpan.startLine + 1,
-        endLine: tagSpan.endLine + 1,
+        startLine: spanStartLine + 1,
+        endLine: spanEndLine + 1,
         original: tagText,
         replacement: finalReplacement,
         explanation: finalExplanation,
@@ -996,7 +1107,10 @@ export async function bulkFixWorkspaceCommand(): Promise<void> {
             const entry = buildChangesForFile(document, fileUri, diagnostics);
             if (entry && entry.changes.length > 0) { entries.push(entry); }
           }
-        } catch { /* skip unreadable files */ }
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          console.warn(`[Accessify] Skipping unreadable file ${fileUri.fsPath}: ${msg}`);
+        }
         completed++;
         progress.report({ increment: (1 / total) * 100, message: `${completed}/${total} files scanned` });
       }
@@ -1065,7 +1179,7 @@ function buildChangesForFile(
     if (!rule) { return false; }
     if (getStaticFixAttribute(rule, d) !== null) { return true; }
     const lineText = document.lineAt(d.range.start.line).text;
-    return getStaticFixReplacement(rule, d, lineText) !== null;
+    return getStaticFixReplacement(rule, d, lineText, document) !== null;
   });
 
   if (filtered.length === 0) { return null; }
@@ -1138,7 +1252,7 @@ function buildChangesForFile(
     }
 
     // Try full line replacement (heading-order, aria-role, color-contrast)
-    const lineReplacement = getStaticFixReplacement(rule, diagnostic, lineText);
+    const lineReplacement = getStaticFixReplacement(rule, diagnostic, lineText, document);
     if (lineReplacement) {
       const repRiskCtx = rule === 'heading-order' && diagnostic.message.includes('Multiple') ? 'multiple-h1' : undefined;
       const repRisk = getStaticFixRisk(rule, repRiskCtx);
@@ -1146,9 +1260,28 @@ function buildChangesForFile(
       const repReasoningParts = [repRisk.reasoning];
       if (repWcag.length > 0) { repReasoningParts.push(`WCAG: ${repWcag.join(', ')}`); }
       if (repRisk.caveat) { repReasoningParts.push(`Caveat: ${repRisk.caveat}`); }
+      // A static fix may span multiple lines (e.g. changing both the opening and
+      // closing tag of a multiline element).
+      let fixStart: number;
+      let fixEnd: number;
+      let fixOriginal: string;
+      if (lineReplacement.spanStart != null && lineReplacement.spanEnd != null) {
+        fixStart = lineReplacement.spanStart;
+        fixEnd = lineReplacement.spanEnd;
+        fixOriginal = lineReplacement.original
+          ?? document.getText(new vscode.Range(fixStart, 0, fixEnd, document.lineAt(fixEnd).text.length));
+      } else if (lineReplacement.targetLine != null) {
+        fixStart = lineReplacement.targetLine;
+        fixEnd = lineReplacement.targetLine;
+        fixOriginal = document.lineAt(lineReplacement.targetLine).text;
+      } else {
+        fixStart = lineNum;
+        fixEnd = lineNum;
+        fixOriginal = lineText;
+      }
       changes.push({
-        id: nextId++, startLine: lineNum + 1, endLine: lineNum + 1,
-        original: lineText, replacement: lineReplacement.replacement,
+        id: nextId++, startLine: fixStart + 1, endLine: fixEnd + 1,
+        original: fixOriginal, replacement: lineReplacement.replacement,
         explanation: lineReplacement.explanation, rule,
         confidence: repRisk.confidence, reasoning: repReasoningParts.join(' | '),
       });
@@ -1169,7 +1302,6 @@ function getStaticFixAttribute(ruleId: string, diagnostic: vscode.Diagnostic): s
     case 'form-label': return 'aria-label="TODO: describe input"';
     case 'click-events-have-key-events':
       return 'role="button" tabIndex={0} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { /* handler */ } }}';
-    case 'nextjs-image-alt': return 'alt=""';
     case 'nextjs-head-lang': return 'lang="en"';
     case 'nextjs-link-text': return 'aria-label="TODO: describe link"';
     case 'autocomplete-valid': return 'autoComplete="name"';
@@ -1177,11 +1309,16 @@ function getStaticFixAttribute(ruleId: string, diagnostic: vscode.Diagnostic): s
     case 'svg-has-accessible-name': return 'aria-label="TODO: describe image"';
     case 'interactive-supports-focus': return 'tabIndex={0}';
     case 'no-noninteractive-element-interactions': return 'role="button" tabIndex={0}';
+    case 'no-target-blank-noopener': return 'rel="noopener noreferrer"';
+    case 'no-autoplay-media': return 'muted';
     case 'aria-pattern': {
       const msg = diagnostic.message;
       if (msg.includes('aria-labelledby') || msg.includes('aria-label')) { return 'aria-label="TODO: describe element"'; }
       if (msg.includes('aria-expanded')) { return 'aria-expanded={false}'; }
-      if (msg.includes('aria-controls') || msg.includes('aria-selected')) { return 'aria-controls="TODO: target-id" aria-selected={false}'; }
+      if (msg.includes('aria-checked')) { return 'aria-checked={false}'; }
+      if (msg.includes('aria-valuenow')) { return 'aria-valuenow={0} aria-valuemin={0} aria-valuemax={100}'; }
+      if (msg.includes('aria-controls')) { return 'aria-controls="TODO: target-id" aria-selected={false}'; }
+      if (msg.includes('aria-selected')) { return 'aria-selected={false}'; }
       return null;
     }
     default: return null;
@@ -1195,7 +1332,8 @@ function getStaticFixReplacement(
   ruleId: string,
   diagnostic: vscode.Diagnostic,
   lineText: string,
-): { replacement: string; explanation: string } | null {
+  document?: vscode.TextDocument,
+): { replacement: string; explanation: string; targetLine?: number; spanStart?: number; spanEnd?: number; original?: string } | null {
   switch (ruleId) {
     case 'heading-order': {
       const msg = diagnostic.message;
@@ -1251,9 +1389,24 @@ function getStaticFixReplacement(
       // Try Tailwind class replacement first
       const twClassMatch = diagnostic.message.match(/replace "([^"]+)" with "([^"]+)"/);
       if (twClassMatch) {
+        // First try on the diagnostic line itself
         const replacement = lineText.replace(twClassMatch[1], twClassMatch[2]);
         if (replacement !== lineText) {
           return { replacement, explanation: `Replace "${twClassMatch[1]}" with "${twClassMatch[2]}" for sufficient contrast` };
+        }
+        // Search nearby lines (className may be on a different line of the same element)
+        if (document) {
+          const startLine = diagnostic.range.start.line;
+          const searchRadius = 10;
+          for (let offset = 1; offset <= searchRadius; offset++) {
+            const candidateLine = startLine + offset;
+            if (candidateLine >= document.lineCount) { break; }
+            const candidateText = document.lineAt(candidateLine).text;
+            if (candidateText.includes(twClassMatch[1])) {
+              const fixedLine = candidateText.replace(twClassMatch[1], twClassMatch[2]);
+              return { replacement: fixedLine, explanation: `Replace "${twClassMatch[1]}" with "${twClassMatch[2]}" for sufficient contrast`, targetLine: candidateLine };
+            }
+          }
         }
       }
 

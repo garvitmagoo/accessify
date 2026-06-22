@@ -101,4 +101,38 @@ describe('aria-pattern rule', () => {
     const issues = collectIssues('<div>hello</div>', checkAriaPattern);
     assert.strictEqual(issues.length, 0);
   });
+
+  /* ── Required state attributes ─────────────────────────────────────── */
+
+  it('flags role="checkbox" without aria-checked', () => {
+    const issues = collectIssues('<div role="checkbox">x</div>', checkAriaPattern);
+    assert.ok(issues.some((i: { message: string }) => i.message.includes('aria-checked')));
+  });
+
+  it('passes role="checkbox" with aria-checked', () => {
+    const issues = collectIssues('<div role="checkbox" aria-checked={false}>x</div>', checkAriaPattern);
+    assert.strictEqual(issues.length, 0);
+  });
+
+  it('flags role="slider" without aria-valuenow', () => {
+    const issues = collectIssues('<div role="slider">x</div>', checkAriaPattern);
+    assert.ok(issues.some((i: { message: string }) => i.message.includes('aria-valuenow')));
+  });
+
+  it('flags role="spinbutton" without aria-valuenow', () => {
+    const issues = collectIssues('<div role="spinbutton">x</div>', checkAriaPattern);
+    assert.ok(issues.some((i: { message: string }) => i.message.includes('aria-valuenow')));
+  });
+
+  it('passes role="slider" with value attributes', () => {
+    const code = '<div role="slider" aria-valuenow={5} aria-valuemin={0} aria-valuemax={10}>x</div>';
+    const issues = collectIssues(code, checkAriaPattern);
+    assert.strictEqual(issues.length, 0);
+  });
+
+  it('flags role="switch" without aria-checked', () => {
+    const issues = collectIssues('<button role="switch">x</button>', checkAriaPattern);
+    assert.ok(issues.some((i: { message: string }) => i.message.includes('aria-checked')));
+  });
 });
+

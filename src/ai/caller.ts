@@ -7,6 +7,21 @@ export const AI_TIMEOUT_MS = 120_000;
 const MAX_RETRIES = 2;
 const INITIAL_BACKOFF_MS = 1_000;
 
+/* ── Diagnostic logging ───────────────────────────────────────────────── */
+
+type AiLogger = (msg: string) => void;
+let _aiLog: AiLogger = () => {};
+
+/** Wire a logger (e.g. the Accessify output channel) for AI network diagnostics. */
+export function setAiLogger(fn: AiLogger): void {
+  _aiLog = fn;
+}
+
+function aiLog(msg: string): void {
+  const line = `[ai-caller] ${msg}`;
+  try { _aiLog(line); } catch { /* ignore */ }
+}
+
 /** Returns true for status codes that are safe to retry. */
 function isRetryable(status: number): boolean {
   return status === 429 || status >= 500;
@@ -32,50 +47,107 @@ function sleep(ms: number): Promise<void> {
  * Execute an HTTP fetch with exponential back-off and rate-limit handling.
  * Retries on 429 / 5xx; throws immediately for non-retryable errors.
  */
-async function fetchWithRetry(
+async function fetchJsonWithRetry<T>(
   url: string,
   init: RequestInit,
   timeoutMs: number,
-): Promise<Response> {
+  externalSignal?: AbortSignal,
+): Promise<T> {
   let lastError: Error | undefined;
+  const bodyBytes = typeof init.body === 'string' ? init.body.length : 0;
+  aiLog(`POST ${url} (request body ${bodyBytes} bytes, timeout ${timeoutMs}ms)`);
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    if (externalSignal?.aborted) {
+      throw new Error('AI request was cancelled.');
+    }
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    // The timeout/abort must cover BOTH the connection phase AND reading the
+    // response body. Slow-streaming models hang in the body-read phase, so the
+    // controller (and therefore cancellation) must stay active until the full
+    // body has been read.
+    const timeoutId = setTimeout(() => {
+      aiLog(`attempt ${attempt + 1}: TIMEOUT after ${timeoutMs}ms — aborting`);
+      controller.abort();
+    }, timeoutMs);
+    const onExternalAbort = () => {
+      aiLog(`attempt ${attempt + 1}: external cancel — aborting`);
+      controller.abort();
+    };
+    externalSignal?.addEventListener('abort', onExternalAbort, { once: true });
 
+    const started = Date.now();
     try {
+      aiLog(`attempt ${attempt + 1}: sending request…`);
       const response = await fetch(url, { ...init, signal: controller.signal });
+      aiLog(`attempt ${attempt + 1}: headers received (status ${response.status}) after ${Date.now() - started}ms`);
 
-      if (response.ok) { return response; }
-
-      if (isRetryable(response.status) && attempt < MAX_RETRIES) {
-        const retryAfter = parseRetryAfter(response);
-        const backoff = retryAfter ?? INITIAL_BACKOFF_MS * Math.pow(2, attempt);
-        await sleep(backoff);
-        continue;
+      if (!response.ok) {
+        if (isRetryable(response.status) && attempt < MAX_RETRIES) {
+          const retryAfter = parseRetryAfter(response);
+          const backoff = retryAfter ?? INITIAL_BACKOFF_MS * Math.pow(2, attempt);
+          aiLog(`attempt ${attempt + 1}: retryable status ${response.status}, backing off ${backoff}ms`);
+          await sleep(backoff);
+          continue;
+        }
+        // Drain the error body (best-effort) so the socket can close.
+        const errText = await response.text().catch(() => '');
+        throw new Error(`API error: ${response.status} ${response.statusText}${errText ? ` — ${errText.slice(0, 300)}` : ''}`);
       }
 
-      // Non-retryable error or exhausted retries
-      throw new Error(`API error: ${response.status} ${response.statusText}`);
+      // Read the body under the SAME controller so timeout/cancel abort the
+      // socket read itself, not just an outer wrapper promise.
+      aiLog(`attempt ${attempt + 1}: reading response body…`);
+      const text = await response.text();
+      aiLog(`attempt ${attempt + 1}: body read (${text.length} chars) after ${Date.now() - started}ms total`);
+      try {
+        return JSON.parse(text) as T;
+      } catch {
+        throw new Error(`Failed to parse AI response as JSON (${text.length} chars)`);
+      }
     } catch (e: unknown) {
+      if (externalSignal?.aborted) {
+        aiLog(`attempt ${attempt + 1}: cancelled by user after ${Date.now() - started}ms`);
+        throw new Error('AI request was cancelled.');
+      }
       if (e instanceof DOMException && e.name === 'AbortError') {
+        aiLog(`attempt ${attempt + 1}: aborted (timeout) after ${Date.now() - started}ms`);
         throw new Error(
-          'AI request timed out. The file may be too large — try reducing its size or increasing the timeout.',
+          'AI request timed out. The model may be too slow or the file too large — try a faster model (e.g. gpt-4o-mini) or a smaller file.',
         );
       }
-      if (attempt < MAX_RETRIES && !(e instanceof Error && e.message.startsWith('API error:'))) {
+      // Retry only transient network errors (not API/parse errors).
+      const isApiOrParse = e instanceof Error && (e.message.startsWith('API error:') || e.message.startsWith('Failed to parse'));
+      if (attempt < MAX_RETRIES && !isApiOrParse) {
         lastError = e instanceof Error ? e : new Error(String(e));
+        aiLog(`attempt ${attempt + 1}: network error "${lastError.message}" after ${Date.now() - started}ms, retrying`);
         await sleep(INITIAL_BACKOFF_MS * Math.pow(2, attempt));
         continue;
       }
+      aiLog(`attempt ${attempt + 1}: failing with "${e instanceof Error ? e.message : String(e)}"`);
       throw e;
     } finally {
       clearTimeout(timeoutId);
+      externalSignal?.removeEventListener('abort', onExternalAbort);
     }
   }
 
   throw lastError ?? new Error('AI request failed after retries');
 }
+
+/* ── AI Provider Response Types ───────────────────────────────────────── */
+
+interface OpenAIResponse {
+  error?: { message: string; type?: string; code?: string };
+  choices: Array<{ message: { content: string }; finish_reason: string }>;
+}
+
+interface ClaudeResponse {
+  error?: { message: string; type?: string };
+  content: Array<{ type: string; text: string }>;
+}
+
+/* ── Call Options ─────────────────────────────────────────────────────── */
 
 export interface AiCallOptions {
   systemPrompt: string;
@@ -83,6 +155,7 @@ export interface AiCallOptions {
   apiKey: string;
   model: string;
   maxTokens?: number;
+  signal?: AbortSignal;
 }
 
 export interface AzureCallOptions extends AiCallOptions {
@@ -90,8 +163,8 @@ export interface AzureCallOptions extends AiCallOptions {
 }
 
 const DEFAULT_MODELS: Record<string, string> = {
-  openai: 'gpt-4',
-  'azure-openai': 'gpt-4',
+  openai: 'gpt-4o',
+  'azure-openai': 'gpt-4o',
   claude: 'claude-sonnet-4-20250514',
 };
 
@@ -110,7 +183,7 @@ export function resolveModelDefault(model: string, provider: string): string {
 export async function callOpenAI(opts: AiCallOptions): Promise<string> {
   const maxTokens = opts.maxTokens ?? 2048;
 
-  const response = await fetchWithRetry(
+  const data = await fetchJsonWithRetry<OpenAIResponse>(
     'https://api.openai.com/v1/chat/completions',
     {
       method: 'POST',
@@ -130,16 +203,20 @@ export async function callOpenAI(opts: AiCallOptions): Promise<string> {
       }),
     },
     AI_TIMEOUT_MS,
+    opts.signal,
   );
 
-  const data = await response.json() as any;
-  if (data?.error) {
+  if (data.error) {
+    aiLog(`callOpenAI: API returned error: ${data.error.message ?? 'unknown'}`);
     throw new Error(`OpenAI API error: ${data.error.message ?? 'unknown'}`);
   }
-  const content = data?.choices?.[0]?.message?.content;
+  aiLog(`callOpenAI: response has ${data.choices?.length ?? 0} choice(s), finish_reason="${data.choices?.[0]?.finish_reason}"`);
+  const content = data.choices?.[0]?.message?.content;
   if (typeof content !== 'string') {
+    aiLog(`callOpenAI: content is ${typeof content}, not string — rejecting`);
     throw new Error('Unexpected AI response format: no content returned');
   }
+  aiLog(`callOpenAI: returning content (${content.length} chars)`);
   return content;
 }
 
@@ -157,7 +234,7 @@ export async function callAzureOpenAI(opts: AzureCallOptions): Promise<string> {
   const url = `${opts.endpoint}/openai/deployments/${opts.model}/chat/completions?api-version=2024-02-01`;
   const maxTokens = opts.maxTokens ?? 2048;
 
-  const response = await fetchWithRetry(
+  const data = await fetchJsonWithRetry<OpenAIResponse>(
     url,
     {
       method: 'POST',
@@ -176,13 +253,13 @@ export async function callAzureOpenAI(opts: AzureCallOptions): Promise<string> {
       }),
     },
     AI_TIMEOUT_MS,
+    opts.signal,
   );
 
-  const data = await response.json() as any;
-  if (data?.error) {
+  if (data.error) {
     throw new Error(`Azure OpenAI API error: ${data.error.message ?? 'unknown'}`);
   }
-  const content = data?.choices?.[0]?.message?.content;
+  const content = data.choices?.[0]?.message?.content;
   if (typeof content !== 'string') {
     throw new Error('Unexpected AI response format: no content returned');
   }
@@ -195,7 +272,7 @@ export async function callAzureOpenAI(opts: AzureCallOptions): Promise<string> {
 export async function callClaude(opts: AiCallOptions): Promise<string> {
   const maxTokens = opts.maxTokens ?? 2048;
 
-  const response = await fetchWithRetry(
+  const data = await fetchJsonWithRetry<ClaudeResponse>(
     'https://api.anthropic.com/v1/messages',
     {
       method: 'POST',
@@ -215,13 +292,13 @@ export async function callClaude(opts: AiCallOptions): Promise<string> {
       }),
     },
     AI_TIMEOUT_MS,
+    opts.signal,
   );
 
-  const data = await response.json() as any;
-  if (data?.error) {
+  if (data.error) {
     throw new Error(`Claude API error: ${data.error.message}`);
   }
-  const content = data?.content?.[0]?.text;
+  const content = data.content?.[0]?.text;
   if (typeof content !== 'string') {
     throw new Error('Unexpected Claude response format: no content returned');
   }
@@ -235,10 +312,20 @@ export async function callAiProvider(
   provider: string,
   opts: AiCallOptions & { endpoint?: string },
 ): Promise<string> {
-  if (provider === 'azure-openai') {
-    return callAzureOpenAI({ ...opts, endpoint: opts.endpoint ?? '' });
-  } else if (provider === 'claude') {
-    return callClaude(opts);
+  aiLog(`callAiProvider: provider=${provider}`);
+  let result: string;
+  try {
+    if (provider === 'azure-openai') {
+      result = await callAzureOpenAI({ ...opts, endpoint: opts.endpoint ?? '' });
+    } else if (provider === 'claude') {
+      result = await callClaude(opts);
+    } else {
+      result = await callOpenAI(opts);
+    }
+  } catch (e) {
+    aiLog(`callAiProvider: CAUGHT error: ${e instanceof Error ? e.message : String(e)}`);
+    throw e;
   }
-  return callOpenAI(opts);
+  aiLog(`callAiProvider: returning ${result.length} chars`);
+  return result;
 }

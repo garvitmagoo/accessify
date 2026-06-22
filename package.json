@@ -1,7 +1,7 @@
 {
   "name": "accessify",
   "displayName": "Accessify",
-  "description": "Catch WCAG 2.1 AA violations in React/JSX/TSX/HTML as you type. 24 rules with auto-fixes, AI-powered fixes (OpenAI, Azure, Claude), and screen reader preview.",
+  "description": "Catch WCAG 2.1 AA violations in React/JSX/TSX/HTML as you type. 26 rules with auto-fixes, AI-powered fixes (OpenAI, Azure, Claude), and screen reader preview.",
   "version": "1.1.1",
   "publisher": "garvit-magoo",
   "license": "MIT",
@@ -137,7 +137,7 @@
         "a11y.aiModel": {
           "type": "string",
           "default": "",
-          "description": "Model/deployment name to use for AI suggestions. Leave empty for provider default (OpenAI: gpt-4, Claude: claude-sonnet-4-20250514)."
+          "description": "Model/deployment name to use for AI suggestions. Leave empty for provider default (OpenAI: gpt-4o, Claude: claude-sonnet-4-20250514)."
         },
         "a11y.aiBatchConcurrency": {
           "type": "integer",
@@ -183,8 +183,9 @@
     "check-types": "tsc --noEmit",
     "watch": "node esbuild.js --watch",
     "lint": "eslint src --ext ts",
-    "test": "tsc -p ./ && mocha",
-    "test:integration": "tsc -p ./ && node out/test/runIntegration.js",
+    "clean": "node -e \"require('fs').rmSync('out',{recursive:true,force:true})\"",
+    "test": "npm run clean && tsc -p ./ && mocha",
+    "test:integration": "npm run clean && tsc -p ./ && node out/test/runIntegration.js",
     "package": "npm run check-types && node esbuild.js --production"
   },
   "devDependencies": {

@@ -15,7 +15,7 @@ import type { AiFixAction } from '../types';
 export function findOpeningTagClose(text: string, tagStart: number): number {
   let i = tagStart;
   if (i < text.length && text[i] === '<') { i++; }
-  while (i < text.length && /[a-zA-Z0-9._\-]/.test(text[i])) { i++; }
+  while (i < text.length && /[a-zA-Z0-9._-]/.test(text[i])) { i++; }
 
   let inString: string | false = false;
   let braceDepth = 0;
@@ -85,23 +85,154 @@ export function insertAttributeIntoTag(tagText: string, attribute: string): stri
 
 /** Modify an existing attribute's value in a JSX tag. */
 export function modifyAttributeInTag(tagText: string, attrName: string, newValue: string): string | null {
-  const escapedName = attrName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const pattern = new RegExp(
-    `(${escapedName}\\s*=\\s*)(?:"[^"]*"|'[^']*'|\\{[^}]*\\})`,
-  );
-  const match = tagText.match(pattern);
-  if (!match) { return null; }
-  return tagText.replace(pattern, `$1${newValue}`);
+  const loc = findAttributeLocation(tagText, attrName);
+  if (!loc) { return null; }
+  return tagText.substring(0, loc.valueStart) + newValue + tagText.substring(loc.valueEnd);
 }
 
 /** Remove an attribute from a JSX tag. */
 export function removeAttributeFromTag(tagText: string, attrName: string): string | null {
-  const escapedName = attrName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const pattern = new RegExp(
-    `\\s+${escapedName}(?:\\s*=\\s*(?:"[^"]*"|'[^']*'|\\{[^}]*\\}))?`,
-  );
-  if (!pattern.test(tagText)) { return null; }
-  return tagText.replace(pattern, '');
+  const loc = findAttributeLocation(tagText, attrName);
+  if (!loc) { return null; }
+  // Include leading whitespace in the removal
+  let start = loc.nameStart;
+  while (start > 0 && (tagText[start - 1] === ' ' || tagText[start - 1] === '\t')) { start--; }
+  // If the whitespace starts at a newline, include it
+  if (start > 0 && (tagText[start - 1] === '\n')) { start--; }
+  if (start > 0 && tagText[start - 1] === '\r') { start--; }
+  // If we'd remove from position 0, keep at least one space
+  if (start === 0) { start = loc.nameStart - 1; }
+  if (start < 0) { start = 0; }
+  return tagText.substring(0, start) + tagText.substring(loc.valueEnd);
+}
+
+/**
+ * Get the quote style used by an existing attribute in a tag.
+ * Returns '"', "'", '{', or null if the attribute is not found or is boolean.
+ */
+function getAttributeQuoteStyle(tagText: string, attrName: string): string | null {
+  const loc = findAttributeLocation(tagText, attrName);
+  if (!loc || loc.valueStart === loc.valueEnd) { return null; }
+  const ch = tagText[loc.valueStart];
+  if (ch === '"' || ch === "'" || ch === '{') { return ch; }
+  return null;
+}
+
+/**
+ * Locate an attribute in a JSX tag string, properly handling nested braces and template literals.
+ * Returns the start/end positions of the attribute name and value.
+ */
+function findAttributeLocation(
+  tagText: string,
+  attrName: string,
+): { nameStart: number; valueStart: number; valueEnd: number } | null {
+  let i = 0;
+  const len = tagText.length;
+
+  // Skip past `<TagName`
+  if (i < len && tagText[i] === '<') { i++; }
+  while (i < len && /[a-zA-Z0-9._-]/.test(tagText[i])) { i++; }
+
+  while (i < len) {
+    // Skip whitespace
+    while (i < len && /\s/.test(tagText[i])) { i++; }
+    if (i >= len || tagText[i] === '>' || (tagText[i] === '/' && i + 1 < len && tagText[i + 1] === '>')) {
+      break;
+    }
+
+    // Read attribute name
+    const nameStart = i;
+    while (i < len && /[\w\-.:]/i.test(tagText[i])) { i++; }
+    const name = tagText.slice(nameStart, i);
+
+    // Guarantee forward progress: if the cursor didn't advance (e.g. it's on a
+    // `{` from a spread `{...props}` or other non-attribute character), skip it.
+    // Without this the outer while-loop would spin forever.
+    if (i === nameStart) { i++; continue; }
+
+    // Skip whitespace
+    while (i < len && /\s/.test(tagText[i])) { i++; }
+
+    if (i < len && tagText[i] === '=') {
+      i++; // skip '='
+      while (i < len && /\s/.test(tagText[i])) { i++; }
+
+      const valueStart = i;
+      i = skipAttributeValue(tagText, i);
+      const valueEnd = i;
+
+      if (name === attrName) {
+        return { nameStart, valueStart, valueEnd };
+      }
+    } else {
+      // Boolean attribute (no value)
+      if (name === attrName) {
+        return { nameStart, valueStart: i, valueEnd: i };
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Skip over a JSX attribute value starting at position i.
+ * Handles quoted strings, template literals, and nested braces/expressions.
+ */
+function skipAttributeValue(text: string, i: number): number {
+  const len = text.length;
+  if (i >= len) { return i; }
+
+  const ch = text[i];
+
+  // Quoted string
+  if (ch === '"' || ch === "'") {
+    i++;
+    while (i < len && text[i] !== ch) {
+      if (text[i] === '\\') { i++; }
+      i++;
+    }
+    if (i < len) { i++; } // skip closing quote
+    return i;
+  }
+
+  // JSX expression container { ... }
+  if (ch === '{') {
+    let depth = 0;
+    let inStr: string | false = false;
+    let inTemplate = false;
+    let templateDepth = 0;
+
+    while (i < len) {
+      const c = text[i];
+      if (inStr) {
+        if (c === inStr && text[i - 1] !== '\\') { inStr = false; }
+        i++;
+        continue;
+      }
+      if (inTemplate) {
+        if (c === '\\') { i += 2; continue; }
+        if (c === '`' && templateDepth === 0) { inTemplate = false; i++; continue; }
+        if (c === '$' && i + 1 < len && text[i + 1] === '{') { templateDepth++; i += 2; continue; }
+        if (c === '}' && templateDepth > 0) { templateDepth--; i++; continue; }
+        i++;
+        continue;
+      }
+      if (c === '`') { inTemplate = true; templateDepth = 0; i++; continue; }
+      if (c === '"' || c === "'") { inStr = c; i++; continue; }
+      if (c === '{') { depth++; }
+      else if (c === '}') {
+        depth--;
+        if (depth === 0) { i++; return i; }
+      }
+      i++;
+    }
+    return i;
+  }
+
+  // Bare value (shouldn't happen in valid JSX, but handle gracefully)
+  while (i < len && !/[\s>]/.test(text[i])) { i++; }
+  return i;
 }
 
 /** Replace a tag name in both opening and closing tags. */
@@ -141,7 +272,13 @@ export function applyActions(tagText: string, actions: AiFixAction[]): string | 
       case 'modifyAttribute': {
         let newValue = action.newValue;
         if (!newValue.startsWith('"') && !newValue.startsWith("'") && !newValue.startsWith('{') && !newValue.startsWith('`')) {
-          newValue = `{${newValue}}`;
+          // Preserve the original attribute's quote style if possible
+          const origQuote = getAttributeQuoteStyle(result, action.name);
+          if (origQuote === '"' || origQuote === "'") {
+            newValue = `${origQuote}${newValue}${origQuote}`;
+          } else {
+            newValue = `"${newValue}"`;
+          }
         }
         const modified = modifyAttributeInTag(result, action.name, newValue);
         if (!modified) { return null; }
@@ -168,6 +305,73 @@ export function applyActions(tagText: string, actions: AiFixAction[]): string | 
   return result;
 }
 
+/* ── Fabricated-attribute detection ──────────────────────────────────── */
+
+/**
+ * Attributes that are never legitimate additions for an a11y-only fix.
+ * If the original code doesn't have them and the replacement adds them, reject.
+ */
+const NEVER_ADD_ATTRS = new Set([
+  'className', 'class', 'style',
+]);
+
+/**
+ * Extract attribute names from a JSX opening tag string.
+ * Handles the tag name prefix and delegates to parseJsxAttributes.
+ */
+function extractAttributeNamesFromTag(tagText: string): Set<string> {
+  // Find end of tag name (skip `<TagName`)
+  let i = 0;
+  if (i < tagText.length && tagText[i] === '<') { i++; }
+  while (i < tagText.length && /[a-zA-Z0-9._-]/.test(tagText[i])) { i++; }
+
+  const attrText = tagText.substring(i);
+  const attrs = parseJsxAttributes(attrText);
+  const names = new Set<string>();
+
+  for (const attr of attrs) {
+    const eqIdx = attr.indexOf('=');
+    const name = eqIdx >= 0 ? attr.substring(0, eqIdx).trim() : attr.trim();
+    if (name) { names.add(name); }
+  }
+
+  return names;
+}
+
+/**
+ * Detect if the AI replacement added attributes that weren't in the original
+ * and aren't accessibility-related.  Catches hallucinated className, style,
+ * and event handlers with placeholder comments.
+ *
+ * Returns the name of the first fabricated attribute found, or null if clean.
+ */
+export function findFabricatedAttribute(original: string, replacement: string): string | null {
+  // Extract just the opening tag portion from both strings
+  const origClose = findOpeningTagClose(original, 0);
+  const replClose = findOpeningTagClose(replacement, 0);
+  const origTag = origClose >= 0 ? original.substring(0, origClose + 1) : original;
+  const replTag = replClose >= 0 ? replacement.substring(0, replClose + 1) : replacement;
+
+  const origNames = extractAttributeNamesFromTag(origTag);
+  const replNames = extractAttributeNamesFromTag(replTag);
+
+  // Check for attributes that should never be added by an a11y fix
+  for (const attr of replNames) {
+    if (origNames.has(attr)) { continue; }
+    if (NEVER_ADD_ATTRS.has(attr)) { return attr; }
+  }
+
+  // Check for new event handlers containing placeholder comments
+  const handlerPattern = /\b(on[A-Z]\w+)=\{[^}]*\/\*[^*]*\*\/[^}]*\}/g;
+  let m: RegExpExecArray | null;
+  while ((m = handlerPattern.exec(replTag)) !== null) {
+    const handlerName = m[1];
+    if (!origNames.has(handlerName)) { return `${handlerName} (placeholder)`; }
+  }
+
+  return null;
+}
+
 /* ── JSX post-processing ─────────────────────────────────────────────── */
 
 /** Strip everything after the opening tag's closing `>` or `/>`. */
@@ -181,7 +385,7 @@ export function stripAfterOpeningTagClose(tagText: string): string {
 
     if (!pastTagName) {
       if (ch === '<') { continue; }
-      if (/[a-zA-Z0-9._\-]/.test(ch)) { continue; }
+      if (/[a-zA-Z0-9._-]/.test(ch)) { continue; }
       pastTagName = true;
     }
 

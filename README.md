@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/media/hero.svg" alt="Accessify — catch WCAG 2.1 AA violations in React, JSX, TSX, and HTML as you type" width="100%"/>
+  <img src="icon.png" alt="Accessify — catch WCAG 2.1 AA violations in React, JSX, TSX, and HTML as you type" width="200"/>
 </p>
 
 <p align="center">
@@ -10,7 +10,7 @@
   <a href="https://www.w3.org/WAI/WCAG21/quickref/"><img src="https://img.shields.io/badge/WCAG-2.1%20AA-3DDC84" alt="WCAG 2.1 AA"/></a>
 </p>
 
-Accessify is a real-time accessibility linter for the editor. It scans React, JSX, TSX, and HTML against **24 WCAG 2.1 Level A & AA rules** as you type, offers one-click fixes (deterministic and AI-powered), and includes a screen reader preview so you can hear your UI the way assistive-technology users do.
+Accessify is a real-time accessibility linter for the editor. It scans React, JSX, TSX, and HTML against **26 WCAG 2.1 Level A & AA rules** as you type, offers one-click fixes (deterministic and AI-powered), and includes a screen reader preview so you can hear your UI the way assistive-technology users do.
 
 ---
 
@@ -19,19 +19,19 @@ Accessify is a real-time accessibility linter for the editor. It scans React, JS
 **Catch issues the moment you type them.**
 
 <p align="center">
-  <img src="docs/media/demo-scan.svg" alt="A red squiggle appears under an img tag missing an alt attribute, with a diagnostic bubble explaining the rule violation" width="100%"/>
+  <img src="icon.png" alt="Demo: scanning in editor" width="200"/>
 </p>
 
 **Fix them with one keystroke.** Press `⌘.` (or `Ctrl+.`) to open Quick Fix.
 
 <p align="center">
-  <img src="docs/media/demo-autofix.svg" alt="The lightbulb appears, the quick fix menu opens, and the alt attribute is inserted into the img tag" width="100%"/>
+  <img src="icon.png" alt="Demo: autofix" width="200"/>
 </p>
 
 **Hear what a screen reader will say.** Open `Accessify: Screen Reader Preview` for the active file.
 
 <p align="center">
-  <img src="docs/media/demo-screenreader.svg" alt="A side panel announces each landmark, heading, image, and button in the source file, in tab order" width="100%"/>
+  <img src="icon.png" alt="Demo: screen reader preview" width="200"/>
 </p>
 
 ---
@@ -83,21 +83,19 @@ All commands are prefixed with `Accessify:` in the Command Palette (`⌘⇧P`):
 
 ---
 
-## Rules (24)
+## Rules (26)
 
-Accessify ships with 24 rules covering WCAG 2.1 Level A and AA.
+Accessify ships with 26 rules covering WCAG 2.1 Level A and AA.
 
 | Rule                                     | WCAG   | Severity | What it catches                                               |
 | ---------------------------------------- | ------ | -------- | ------------------------------------------------------------- |
-| `img-alt`                                | 1.1.1  | Error    | `<img>` without an `alt` attribute                            |
-| `nextjs-image-alt`                       | 1.1.1  | Error    | Next.js `<Image>` without `alt`                               |
+| `img-alt`                                | 1.1.1  | Error    | `<img>` or Next.js `<Image>` without an `alt` attribute       |
 | `nextjs-link-text`                       | 1.1.1  | Warning  | Next.js `<Link>` without discernible text                     |
 | `svg-has-accessible-name`                | 1.1.1  | Warning  | `<svg>` missing `<title>`, `aria-label`, or `aria-labelledby` |
 | `media-has-caption`                      | 1.2.2  | Error    | `<video>` / `<audio>` without captions (unless muted)         |
 | `form-label`                             | 1.3.1  | Warning  | Form inputs without an associated label                       |
 | `label-has-associated-control`           | 1.3.1  | Warning  | `<label>` not linked to a control via `htmlFor` or wrapping   |
 | `heading-order`                          | 1.3.1  | Warning  | Heading levels skipped (e.g. `h1` → `h3`)                     |
-| `prefer-semantic-elements`               | 1.3.1  | Warning  | `<div role="…">` where a native element exists                |
 | `autocomplete-valid`                     | 1.3.5  | Warning  | Personal-data inputs without valid `autoComplete`             |
 | `color-contrast`                         | 1.4.3  | Warning  | Inline / Tailwind foreground+background below 4.5:1           |
 | `no-mouse-only-hover`                    | 1.4.13 | Warning  | Hover content with no keyboard equivalent                     |
@@ -113,6 +111,10 @@ Accessify ships with 24 rules covering WCAG 2.1 Level A and AA.
 | `aria-pattern`                           | 4.1.2  | Error    | ARIA widget patterns missing required structure               |
 | `button-label`                           | 4.1.2  | Error    | `<button>` without an accessible name                         |
 | `no-noninteractive-element-interactions` | 4.1.2  | Warning  | Event handlers on non-interactive elements                    |
+| `no-target-blank-noopener`               | 4.1.2  | Warning  | `target="_blank"` without `rel="noopener noreferrer"`          |
+| `no-autoplay-media`                      | 1.4.2  | Warning  | Autoplaying `<video>`/`<audio>` without `muted` or `controls` |
+| `no-duplicate-id`                        | 4.1.1  | Warning  | Duplicate `id` values within a file                           |
+| `aria-valid-ref`                         | 1.3.1  | Warning  | `aria-labelledby`/`-describedby`/`-controls` to a missing id  |
 
 You can disable any rule, override severity, or scope rules by glob in `.a11yrc.json`.
 
@@ -236,7 +238,7 @@ src/
 │   ├── astScanner.ts     AST walker, rule orchestration
 │   ├── axeIntegration.ts axe-core metadata + fix validation
 │   ├── screenReaderSimulator.ts  SR announcement engine
-│   └── rules/            24 individual rule checkers
+│   └── rules/            26 individual rule checkers
 └── webview/
     ├── reportPanel.ts            Accessibility report
     ├── screenReaderPanel.ts      Screen reader simulator UI

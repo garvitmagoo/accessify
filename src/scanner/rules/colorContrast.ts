@@ -307,6 +307,74 @@ function getClassNameValue(
 }
 
 /**
+ * Determine whether a JSX element declares a background, and resolve its color
+ * when statically possible. `declared` is true when the element sets ANY
+ * background (inline `backgroundColor` / `background`, or a `bg-*` class) even
+ * if the value can't be resolved — this lets the ancestor walk stop at the
+ * nearest background-bearing element rather than reaching past it.
+ */
+function getElementBackgroundInfo(
+  el: ts.JsxSelfClosingElement | ts.JsxOpeningElement,
+  sf: ts.SourceFile,
+): { declared: boolean; value?: string } {
+  // Inline style background
+  for (const prop of el.attributes.properties) {
+    if (!ts.isJsxAttribute(prop) || prop.name.getText(sf) !== 'style') { continue; }
+    if (!prop.initializer || !ts.isJsxExpression(prop.initializer)) { continue; }
+    const expr = prop.initializer.expression;
+    if (!expr || !ts.isObjectLiteralExpression(expr)) { continue; }
+    for (const p of expr.properties) {
+      if (!ts.isPropertyAssignment(p)) { continue; }
+      if (!BG_KEYS.has(p.name.getText(sf))) { continue; }
+      const val = ts.isStringLiteral(p.initializer) ? p.initializer.text : undefined;
+      return { declared: true, value: val };
+    }
+  }
+
+  // className background
+  const classList = getClassNameValue(el, sf);
+  if (classList) {
+    const tw = extractTailwindColors(classList);
+    if (tw.bg) { return { declared: true, value: tw.bg }; }
+    // A `bg-*` utility is present but couldn't be resolved (gradient, CSS var,
+    // arbitrary non-color value, etc.) — treat as declared-but-unresolvable.
+    if (/(?:^|\s)bg-\S+/.test(classList)) { return { declared: true, value: undefined }; }
+  }
+
+  return { declared: false };
+}
+
+/**
+ * Walk up the JSX ancestor chain to find the background the element actually
+ * renders against. CSS backgrounds paint behind descendants, so the nearest
+ * ancestor that sets a background is the effective background for this element.
+ *
+ * Stops at the FIRST ancestor that declares a background:
+ *  - resolvable    → returns that color
+ *  - unresolvable  → returns `undefined` (we refuse to guess past a nearer,
+ *                    dynamic background, which keeps us free of false positives)
+ */
+function findAncestorBackground(
+  node: ts.JsxSelfClosingElement | ts.JsxOpeningElement,
+  sf: ts.SourceFile,
+): string | undefined {
+  const MAX_DEPTH = 30;
+  let current: ts.Node | undefined = node.parent;
+  let depth = 0;
+
+  while (current && depth < MAX_DEPTH) {
+    if (ts.isJsxElement(current) && current.openingElement !== node) {
+      const info = getElementBackgroundInfo(current.openingElement, sf);
+      if (info.declared) { return info.value; }
+    }
+    current = current.parent;
+    depth++;
+  }
+
+  return undefined;
+}
+
+/**
  * Extract foreground and background colors from a JSX element.
  * Checks inline styles first, then falls back to className-based
  * Tailwind / utility-class parsing. Inline styles take precedence
@@ -315,7 +383,7 @@ function getClassNameValue(
 function extractColors(
   node: ts.JsxSelfClosingElement | ts.JsxOpeningElement,
   sf: ts.SourceFile,
-): { fg?: string; bg?: string; opacity?: number; source: 'inline' | 'class'; fgClass?: string; bgClass?: string } {
+): { fg?: string; bg?: string; opacity?: number; source: 'inline' | 'class'; fgClass?: string; bgClass?: string; bgInherited?: boolean } {
   const inline = extractInlineColors(node, sf);
   if (inline.fg && inline.bg) {
     return { fg: inline.fg, bg: inline.bg, opacity: inline.opacity, source: 'inline' };
@@ -327,10 +395,22 @@ function extractColors(
 
   // Merge — inline styles override class-based colors
   const fg = inline.fg ?? tw.fg;
-  const bg = inline.bg ?? tw.bg;
+  let bg = inline.bg ?? tw.bg;
+  let bgInherited = false;
+
+  // The element sets a foreground but no background of its own. Resolve the
+  // background it actually renders against by walking up the JSX tree.
+  if (fg && !bg) {
+    const ancestorBg = findAncestorBackground(node, sf);
+    if (ancestorBg) {
+      bg = ancestorBg;
+      bgInherited = true;
+    }
+  }
+
   const source: 'inline' | 'class' = (!inline.fg && !inline.bg && (tw.fg || tw.bg)) ? 'class' : 'inline';
 
-  return { fg, bg, opacity: inline.opacity, source, fgClass: tw.fgClass, bgClass: tw.bgClass };
+  return { fg, bg, opacity: inline.opacity, source, fgClass: tw.fgClass, bgClass: tw.bgClass, bgInherited };
 }
 
 function blendAgainstWhite(c: RGB, alpha: number): RGB {
@@ -355,7 +435,7 @@ export function checkColorContrast(node: ts.Node, sourceFile: ts.SourceFile): A1
     return issues;
   }
 
-  const { fg, bg, opacity, source, fgClass, bgClass } = extractColors(node, sourceFile);
+  const { fg, bg, opacity, source, fgClass, bgClass, bgInherited } = extractColors(node, sourceFile);
 
   // We can only check when both colors are statically resolvable
   if (!fg || !bg) { return issues; }
@@ -377,9 +457,11 @@ export function checkColorContrast(node: ts.Node, sourceFile: ts.SourceFile): A1
   if (ratio < 4.5) {
     const { line, character } = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile));
     const via = source === 'class' ? ' (via class utilities)' : '';
+    const inheritedNote = bgInherited ? ', inherited from an ancestor' : '';
 
     // Build suggestion info
     const data: Record<string, string> = { foreground: fg, background: bg, source };
+    if (bgInherited) { data.bgInherited = 'true'; }
     let suggestion = '';
 
     if (hasOpacity) {
@@ -423,7 +505,7 @@ export function checkColorContrast(node: ts.Node, sourceFile: ts.SourceFile): A1
     }
 
     issues.push({
-      message: `Insufficient color contrast — ratio ${ratioStr}:1 (foreground: "${fg}", background: "${bg}"${hasOpacity ? `, opacity: ${opacity}` : ''})${via}. WCAG AA requires ≥ 4.5:1 for normal text.${suggestion}`,
+      message: `Insufficient color contrast — ratio ${ratioStr}:1 (foreground: "${fg}", background: "${bg}"${inheritedNote}${hasOpacity ? `, opacity: ${opacity}` : ''})${via}. WCAG AA requires ≥ 4.5:1 for normal text.${suggestion}`,
       rule: 'color-contrast',
       severity: ratio < 3 ? 'error' : 'warning',
       line,

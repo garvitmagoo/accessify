@@ -260,6 +260,80 @@ export function checkAriaPattern(node: ts.Node, sourceFile: ts.SourceFile): A11y
       }
       break;
     }
+
+    // ── checkbox / switch / menuitemcheckbox must have aria-checked ──
+    case 'checkbox':
+    case 'switch':
+    case 'menuitemcheckbox': {
+      if (!hasAttr(node, 'aria-checked', sourceFile)) {
+        issues.push({
+          message: `\`role="${role}"\` must have \`aria-checked\` to expose its on/off state.`,
+          rule: 'aria-pattern',
+          severity: 'error',
+          line, column: character, snippet,
+        });
+      }
+      break;
+    }
+
+    // ── radio / menuitemradio must have aria-checked ──
+    case 'radio':
+    case 'menuitemradio': {
+      if (!hasAttr(node, 'aria-checked', sourceFile)) {
+        issues.push({
+          message: `\`role="${role}"\` must have \`aria-checked\` to expose its selected state.`,
+          rule: 'aria-pattern',
+          severity: 'error',
+          line, column: character, snippet,
+        });
+      }
+      break;
+    }
+
+    // ── slider / spinbutton / scrollbar must have aria-valuenow (+ min/max) ──
+    case 'slider':
+    case 'spinbutton':
+    case 'scrollbar': {
+      const missing = ['aria-valuenow', 'aria-valuemin', 'aria-valuemax']
+        .filter(a => !hasAttr(node, a, sourceFile));
+      if (missing.includes('aria-valuenow')) {
+        issues.push({
+          message: `\`role="${role}"\` must have \`aria-valuenow\`${
+            missing.length > 1 ? ` (and \`${missing.filter(a => a !== 'aria-valuenow').join('`, `')}\`)` : ''
+          } to expose its current value.`,
+          rule: 'aria-pattern',
+          severity: 'error',
+          line, column: character, snippet,
+        });
+      }
+      break;
+    }
+
+    // ── progressbar should expose aria-valuenow ──
+    case 'progressbar': {
+      if (!hasAttr(node, 'aria-valuenow', sourceFile)) {
+        issues.push({
+          message: '`role="progressbar"` should have `aria-valuenow` (omit only for indeterminate progress).',
+          rule: 'aria-pattern',
+          severity: 'warning',
+          line, column: character, snippet,
+        });
+      }
+      break;
+    }
+
+    // ── option should expose aria-selected ──
+    case 'option': {
+      if (!hasAttr(node, 'aria-selected', sourceFile)) {
+        issues.push({
+          message: '`role="option"` should have `aria-selected` to expose its selection state.',
+          rule: 'aria-pattern',
+          severity: 'warning',
+          line, column: character, snippet,
+        });
+      }
+      break;
+    }
   }
 
   return issues;

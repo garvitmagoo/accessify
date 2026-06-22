@@ -221,9 +221,13 @@ export function activate(context: vscode.ExtensionContext): void {
           {
             location: vscode.ProgressLocation.Notification,
             title: 'Accessify: Generating AI fixes for entire file…',
-            cancellable: false,
+            cancellable: true,
           },
-          () => getFullFileFix(document),
+          (_progress, token) => {
+            const abortController = new AbortController();
+            token.onCancellationRequested(() => abortController.abort());
+            return getFullFileFix(document, { signal: abortController.signal });
+          },
         );
 
         if (result && result.changes.length > 0) {
@@ -323,7 +327,9 @@ export function activate(context: vscode.ExtensionContext): void {
               batch.map(async (fileUri) => {
                 try {
                   const document = await vscode.workspace.openTextDocument(fileUri);
-                  const result = await getFullFileFix(document, { silent: true });
+                  const abortController = new AbortController();
+                  token.onCancellationRequested(() => abortController.abort());
+                  const result = await getFullFileFix(document, { silent: true, signal: abortController.signal });
                   return { fileUri, result };
                 } catch (e) {
                   const msg = e instanceof Error ? e.message : String(e);

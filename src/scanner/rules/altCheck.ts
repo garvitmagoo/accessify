@@ -1,6 +1,6 @@
 /**
  * Factory for creating alt-attribute checkers.
- * Shared by img-alt and nextjs-image-alt rules to avoid duplication.
+ * Used by the img-alt rule (covers both <img> and Next.js <Image>).
  */
 
 import * as ts from 'typescript';
@@ -8,7 +8,7 @@ import type { A11yIssue } from '../../types';
 import { hasSpreadProps, isAriaHidden, hasAttr } from './jsxHelpers';
 
 export interface AltCheckConfig {
-  tagName: string;
+  tagName: string | string[];
   ruleId: string;
   message: string;
 }
@@ -30,7 +30,8 @@ export function createAltChecker(config: AltCheckConfig) {
     }
 
     const tagName = node.tagName.getText(sourceFile);
-    if (tagName !== config.tagName) {
+    const validTags = Array.isArray(config.tagName) ? config.tagName : [config.tagName];
+    if (!validTags.includes(tagName)) {
       return [];
     }
 

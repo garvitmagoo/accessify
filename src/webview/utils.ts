@@ -16,6 +16,28 @@ export function getNonce(): string {
   return nonce;
 }
 
+/**
+ * Detect whether a proposed fix inserts placeholder values that the user must
+ * fill in manually (e.g. an empty `aria-label=""` or a `/* handler *\/` stub).
+ * Such changes are left unchecked by default in the fix-preview panels so they
+ * are only applied when the user explicitly opts in.
+ */
+export function changeNeedsManualEdit(replacement: string): boolean {
+  return (
+    replacement.includes('aria-label=""') ||
+    replacement.includes("aria-label=''") ||
+    replacement.includes('alt=""') ||
+    replacement.includes("alt=''") ||
+    replacement.includes('aria-controls=""') ||
+    replacement.includes("aria-controls=''") ||
+    replacement.includes('aria-labelledby=""') ||
+    replacement.includes("aria-labelledby=''") ||
+    replacement.includes('autoComplete="name"') ||
+    replacement.includes('/* handler */') ||
+    replacement.includes('TODO')
+  );
+}
+
 /** Commands shown in the command bar across all webviews. */
 const A11Y_COMMANDS = [
   { id: 'a11y.showReport', label: 'Accessibility Report', icon: '\u{1F4CA}' },

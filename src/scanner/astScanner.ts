@@ -8,7 +8,6 @@ import { checkClickKeyEvents } from './rules/clickKeyEvents';
 import { checkAriaPattern } from './rules/ariaPattern';
 import { checkColorContrast } from './rules/colorContrast';
 import { createHeadingOrderChecker } from './rules/headingOrder';
-import { checkNextjsImageAlt } from './rules/nextjsImage';
 import { checkNextjsHeadLang } from './rules/nextjsHeadLang';
 import { checkNextjsLink } from './rules/nextjsLink';
 import { checkAutocompleteValid } from './rules/autocompleteValid';
@@ -22,8 +21,10 @@ import { checkFocusVisible } from './rules/focusVisible';
 import { checkLabelHasAssociatedControl } from './rules/labelHasAssociatedControl';
 import { checkMediaHasCaption } from './rules/mediaHasCaption';
 import { checkPageTitle } from './rules/pageTitle';
-import { checkPreferSemanticElements } from './rules/preferSemanticElements';
 import { checkSkipLink } from './rules/skipLink';
+import { checkNoTargetBlankNoopener } from './rules/noTargetBlankNoopener';
+import { checkNoAutoplayMedia } from './rules/noAutoplayMedia';
+import { createIdValidationChecker } from './rules/idValidation';
 
 type RuleChecker = (node: ts.Node, sourceFile: ts.SourceFile) => A11yIssue[];
 
@@ -35,7 +36,6 @@ const PER_NODE_RULES: RuleChecker[] = [
   checkClickKeyEvents,
   checkAriaPattern,
   checkColorContrast,
-  checkNextjsImageAlt,
   checkNextjsHeadLang,
   checkNextjsLink,
   checkAutocompleteValid,
@@ -49,8 +49,9 @@ const PER_NODE_RULES: RuleChecker[] = [
   checkLabelHasAssociatedControl,
   checkMediaHasCaption,
   checkPageTitle,
-  checkPreferSemanticElements,
   checkSkipLink,
+  checkNoTargetBlankNoopener,
+  checkNoAutoplayMedia,
 ];
 
 /**
@@ -79,22 +80,26 @@ function scanForA11yIssuesUnsafe(sourceCode: string, fileName: string): A11yIssu
 
   // File-level rules that need state across nodes
   const checkHeadingOrder = createHeadingOrderChecker();
+  const checkIdValidation = createIdValidationChecker();
 
   function visit(node: ts.Node) {
     for (const rule of PER_NODE_RULES) {
       const ruleIssues = rule(node, sourceFile);
       issues.push(...ruleIssues);
     }
-    // Heading order collects headings per-node (no-op for non-heading nodes)
+    // File-level checkers collect state per-node (no-op for irrelevant nodes)
     checkHeadingOrder(node, sourceFile);
+    checkIdValidation(node, sourceFile);
 
     ts.forEachChild(node, visit);
   }
 
   visit(sourceFile);
-  // Run heading checker on the SourceFile node to emit collected results
+  // Run file-level checkers on the SourceFile node to emit collected results
   const finalHeadingIssues = checkHeadingOrder(sourceFile, sourceFile);
   issues.push(...finalHeadingIssues);
+  const finalIdIssues = checkIdValidation(sourceFile, sourceFile);
+  issues.push(...finalIdIssues);
 
   return issues;
 }

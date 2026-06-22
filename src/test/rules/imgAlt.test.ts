@@ -59,4 +59,22 @@ describe('img-alt rule', () => {
     const issues = collectIssues('<img src="bg.png" role="none" />', checkImgAlt);
     assert.strictEqual(issues.length, 0);
   });
+
+  /* ── Next.js <Image> ──────────────────────────────────────────────── */
+
+  it('flags Next.js <Image> without alt attribute', () => {
+    const issues = collectIssues('<Image src="/logo.png" width={100} height={100} />', checkImgAlt);
+    assert.strictEqual(issues.length, 1);
+    assert.strictEqual(issues[0].rule, 'img-alt');
+  });
+
+  it('passes Next.js <Image> with alt attribute', () => {
+    const issues = collectIssues('<Image src="/logo.png" alt="Company logo" width={100} height={100} />', checkImgAlt);
+    assert.strictEqual(issues.length, 0);
+  });
+
+  it('passes Next.js <Image> with empty alt (decorative)', () => {
+    const issues = collectIssues('<Image src="/bg.png" alt="" width={100} height={100} />', checkImgAlt);
+    assert.strictEqual(issues.length, 0);
+  });
 });

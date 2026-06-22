@@ -1,7 +1,8 @@
 import * as vscode from 'vscode';
 import * as crypto from 'crypto';
 import type { A11yIssue, AiFixResponse, AiFixAction } from '../types';
-import { callAiProvider, resolveModelDefault } from './caller';
+import { callAiProvider, resolveModelDefault, setAiLogger } from './caller';
+import { appendFixLog } from './fullFileFix';
 
 const SYSTEM_PROMPT = `You are an accessibility expert specializing in React and WCAG 2.1 compliance.
 Given a code snippet and an accessibility issue, provide a minimal, targeted fix.
@@ -39,8 +40,12 @@ Rules:
 - Follow WCAG 2.1 Level AA guidelines
 - Use semantic HTML where possible
 - Do not add unnecessary attributes
+- Do NOT add className, class, or style attributes. Do NOT fabricate event handlers. Only add attributes that directly fix the accessibility issue (aria-*, role, alt, lang, htmlFor, scope, tabIndex, etc.).
+- Preserve ALL existing attributes exactly as-is. Only add/modify/remove what is needed for the a11y fix.
 - IMPORTANT: The code is JSX/React. Use JSX attribute names: className, htmlFor, tabIndex, onClick, onKeyDown.
-- If returning fixedCode: preserve the exact indentation, line breaks, and formatting. Do NOT add children or closing tags not in the original snippet.`;
+- If returning fixedCode: preserve the exact indentation, line breaks, and formatting. Do NOT add children or closing tags not in the original snippet.
+- For page-title issues: infer a descriptive, meaningful title from the file path, component name, or page content — never use generic text like "Page Title" or "Untitled".
+- For color-contrast issues: adjust the color value to meet WCAG AA contrast ratio ≥ 4.5:1 while staying as close to the original hue as possible. Prefer darkening for light backgrounds and lightening for dark backgrounds.`;
 
 let _secrets: vscode.SecretStorage | undefined;
 
@@ -106,14 +111,18 @@ function getCachedFix(code: string, rule: string, message: string): AiFixRespons
     aiFixCache.delete(key);
     return null;
   }
+  // LRU: move to end so it's evicted last
+  aiFixCache.delete(key);
+  aiFixCache.set(key, cached);
   return cached.response;
 }
 
 function setCachedFix(code: string, rule: string, message: string, response: AiFixResponse): void {
   const key = cacheKey(code, rule, message);
   if (aiFixCache.size >= AI_FIX_CACHE_MAX) {
-    const firstKey = aiFixCache.keys().next().value;
-    if (firstKey) { aiFixCache.delete(firstKey); }
+    // Evict least-recently-used (first entry in Map iteration order)
+    const lruKey = aiFixCache.keys().next().value;
+    if (lruKey) { aiFixCache.delete(lruKey); }
   }
   aiFixCache.set(key, { response, timestamp: Date.now() });
 }
@@ -126,7 +135,7 @@ export function clearAiFixCache(): void {
 /**
  * Get an AI-powered fix suggestion for an accessibility issue.
  */
-export async function getAiFix(code: string, issue: A11yIssue, surroundingContext: string): Promise<AiFixResponse | null> {
+export async function getAiFix(code: string, issue: A11yIssue, surroundingContext: string, signal?: AbortSignal): Promise<AiFixResponse | null> {
   const config = vscode.workspace.getConfiguration('a11y');
   const provider = config.get<string>('aiProvider', 'none');
 
@@ -175,12 +184,14 @@ Return JSON with "actions" array (preferred) or "fixedCode" string.`;
 
   try {
     const endpoint = config.get<string>('aiEndpoint', '');
+    setAiLogger(appendFixLog);
     const response = await callAiProvider(provider, {
       systemPrompt: SYSTEM_PROMPT,
       userMessage,
       apiKey,
       model,
       endpoint,
+      signal,
     });
 
     let cleaned = response.trim();
