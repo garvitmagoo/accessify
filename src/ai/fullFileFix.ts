@@ -148,7 +148,7 @@ PREFERRED format — structured actions (handles formatting automatically):
   "explanation": "<brief>", "rule": "<rule id>"
 }] }
 
-FALLBACK format — ONLY when actions can't express the fix (restructuring, wrapping):
+FALLBACK format — ONLY when actions can't express the fix (e.g. adjusting an existing element's tag text):
 { "changes": [{
   "startLine": <1-based>, "endLine": <1-based inclusive>,
   "replacement": "<fixed code for those lines>",
@@ -157,16 +157,19 @@ FALLBACK format — ONLY when actions can't express the fix (restructuring, wrap
 
 Rules:
 - ONE change per issue. Identify it by startLine/endLine (1-based, matching the line numbers shown). Do NOT include "original".
-- Prefer "actions" over "replacement" — they are shorter and safer. Only use "replacement" when restructuring is required.
+- Prefer "actions" over "replacement" — they are shorter and safer. Only use "replacement" when an in-place attribute edit is not enough.
 - Target the SMALLEST range. For a multiline opening tag, set startLine/endLine to span from <Tag through its closing >.
 - Keep "explanation" to a short phrase. Omit "reasoning" — it is not needed.
 - Use JSX attribute names: className, htmlFor, tabIndex, onClick, onKeyDown.
 - When adding a role, include ALL required ARIA attrs (e.g. role="tab" needs aria-controls + aria-selected).
 - Changes must NOT overlap. Do NOT change logic, imports, or non-JSX code.
+- Do NOT wrap an element in a new parent element and do NOT add sibling elements. Fix the existing element in place.
+- You MAY promote a generic non-semantic element (<div> or <span>) to a semantic interactive element (e.g. <div onClick> → <button>) when that is the cleanest fix. But do NOT convert a meaningful element that renders its own content — <img>, <input>, <video>, <audio>, <a>, <textarea>, <select>, <svg>, etc. — into a different tag. For a click handler on such an element, add role="button" + tabIndex={0} + an onKeyDown handler to that SAME element instead. (Correcting an invalid/typo ARIA role value is always allowed.)
 - Do NOT add className, class, or style attributes. Do NOT fabricate event handlers with placeholder comments. Only add/modify/remove what is needed for the a11y fix.
 - Preserve ALL existing attributes exactly as-is. The replacement must not introduce new styling, layout, or behavioral code.
 - For "color-contrast" with Tailwind classes: use modifyAttribute on className to replace the color class. E.g. replace "text-[#ffc266]" with "text-[#613a00]" inside the existing className value.
 - For "value" in addAttribute/modifyAttribute: use the full JSX value including quotes or braces, e.g. "\\"label\\"", "{0}", "{\`text \${i}\`}".
+- NEVER fabricate or guess an accessible name (aria-label, alt, title, link/button text). Only use a real value if it is clearly derivable from the SAME code — e.g. an icon component name like <CloseIcon /> → "Close", visible text already present, or an existing prop. If you cannot derive it, use the literal placeholder "TODO: describe …" (e.g. aria-label="TODO: describe action"). Do not invent specific words that do not appear in the source.
 - Return ONLY the JSON object.`;
 
 export interface FullFileFixOptions {

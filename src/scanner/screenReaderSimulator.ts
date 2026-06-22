@@ -102,9 +102,28 @@ export function simulateScreenReader(
 
   function normalizeAnnouncementText(text: string): string {
     return decodeJsxEntities(text)
+      // Strip JSX comments {/* ... */}
       .replace(/\{\/\*[\s\S]*?\*\/\}/g, " ")
+      // Collapse whitespace
       .replace(/\s+/g, " ")
       .trim();
+  }
+
+  /**
+   * Returns true if a string looks like raw code / CSS classes rather than
+   * human-readable text. Used as a safety gate before inserting text into
+   * announcements.
+   */
+  function looksLikeCode(text: string): boolean {
+    // Tailwind / CSS utility class patterns: "text-[#fff]", "bg-red-500", "hover:border-white/5", etc.
+    const utilityClassPattern = /(?:^|\s)(?:[\w-]+:)?(?:[a-z][\w-]*-\[.+?\]|[a-z][\w-]*-[\w./]+)/;
+    // JSX / expression syntax: unmatched brackets, closing tags, arrow functions
+    const codeSyntaxPattern = /[{}()[\]<>;]|=>|&&|\|\||\?\./;
+    // If more than 30% of the string is non-alphanumeric (excluding basic punctuation)
+    const stripped = text.replace(/[a-zA-Z0-9\s.,!?'"©®™$€£¥:–—-]/g, "");
+    const specialCharRatio = stripped.length / Math.max(text.length, 1);
+
+    return utilityClassPattern.test(text) || codeSyntaxPattern.test(text) || specialCharRatio > 0.3;
   }
 
   function getAttr(
@@ -140,7 +159,7 @@ export function simulateScreenReader(
     for (const child of element.children) {
       if (ts.isJsxText(child)) {
         const t = normalizeAnnouncementText(child.getText(sourceFile));
-        if (t) {
+        if (t && !looksLikeCode(t)) {
           parts.push(t);
         }
       } else if (ts.isJsxExpression(child) && child.expression) {
@@ -161,13 +180,25 @@ export function simulateScreenReader(
           // Self-closing components don't contribute textual content.
         } else {
           const text = stringifyExpression(child.expression);
-          if (text) {
+          if (text && !looksLikeCode(text)) {
             parts.push(text);
           }
         }
       } else if (ts.isJsxElement(child)) {
         // Recurse into child elements to extract only text, not raw JSX
         parts.push(getTextContent(child));
+      } else if (ts.isJsxFragment(child)) {
+        // Recurse into fragments
+        for (const fragChild of child.children) {
+          if (ts.isJsxText(fragChild)) {
+            const t = normalizeAnnouncementText(fragChild.getText(sourceFile));
+            if (t && !looksLikeCode(t)) {
+              parts.push(t);
+            }
+          } else if (ts.isJsxElement(fragChild)) {
+            parts.push(getTextContent(fragChild));
+          }
+        }
       }
       // Deliberately skip JsxSelfClosingElement children — they don't
       // contribute text content (e.g. <Box />, <Icon />, <br />).
@@ -202,8 +233,10 @@ export function simulateScreenReader(
    * Produce a compact, friendly string for arbitrary expressions so the
    * screen reader preview doesn't show raw code. Examples:
    *  - identifiers -> "{varName}"
-   *  - array/map expressions -> "[list]"
-   *  - JSX expressions or complex nodes -> "[dynamic]"
+   *  - array/map expressions -> "" (dynamic list)
+   *  - JSX expressions or complex nodes -> "" (omit rather than "[dynamic]")
+   *  - string literals -> the text
+   *  - numeric literals -> the number as text
    */
   function stringifyExpression(node: ts.Node): string {
     if (ts.isIdentifier(node)) {
@@ -211,6 +244,9 @@ export function simulateScreenReader(
     }
     if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
       return normalizeAnnouncementText(node.text);
+    }
+    if (ts.isNumericLiteral(node)) {
+      return node.text;
     }
     if (ts.isParenthesizedExpression(node)) {
       if (ts.isJsxElement(node.expression)) {
@@ -221,29 +257,97 @@ export function simulateScreenReader(
       }
       return stringifyExpression(node.expression);
     }
+    // Ternary: try to extract text from the truthy branch only as a hint
+    if (ts.isConditionalExpression(node)) {
+      const whenTrue = stringifyExpression(node.whenTrue);
+      if (whenTrue && !looksLikeCode(whenTrue)) {
+        return whenTrue;
+      }
+      return "";
+    }
+    // Logical expressions (&&, ||, ??) — try the right operand
+    if (ts.isBinaryExpression(node)) {
+      const op = node.operatorToken.kind;
+      if (
+        op === ts.SyntaxKind.AmpersandAmpersandToken ||
+        op === ts.SyntaxKind.BarBarToken ||
+        op === ts.SyntaxKind.QuestionQuestionToken
+      ) {
+        const right = stringifyExpression(node.right);
+        if (right && !looksLikeCode(right)) {
+          return right;
+        }
+        return "";
+      }
+      // String concatenation with +
+      if (op === ts.SyntaxKind.PlusToken) {
+        const left = stringifyExpression(node.left);
+        const right = stringifyExpression(node.right);
+        const result = [left, right].filter(Boolean).join(" ");
+        return result && !looksLikeCode(result) ? result : "";
+      }
+      return "";
+    }
+    // Template literals: extract the static text parts, use placeholders for spans
+    if (ts.isTemplateExpression(node)) {
+      const parts: string[] = [];
+      const head = node.head.text;
+      if (head.trim()) {
+        parts.push(head.trim());
+      }
+      for (const span of node.templateSpans) {
+        // For template spans, try to get a short representation
+        const spanExpr = stringifyExpression(span.expression);
+        if (spanExpr && !looksLikeCode(spanExpr)) {
+          parts.push(spanExpr);
+        }
+        const literal = span.literal.text;
+        if (literal.trim()) {
+          parts.push(literal.trim());
+        }
+      }
+      const result = parts.join(" ");
+      return result && !looksLikeCode(result) ? result : "";
+    }
     if (
       ts.isCallExpression(node) ||
       ts.isPropertyAccessExpression(node) ||
       ts.isElementAccessExpression(node)
     ) {
       const text = node.getText(sourceFile);
-      if (/\bmap\b|\bfilter\b|\bjoin\b/.test(text)) {
+      // Array iteration / formatting — produces dynamic content, omit
+      if (/\bmap\b|\bfilter\b|\bjoin\b|\breduce\b|\bforEach\b/.test(text)) {
         return "";
       }
-      return "[dynamic]";
+      // Common text formatting calls (e.g. t("key"), intl.formatMessage, etc.)
+      if (/\bt\(|\bformat\b|\btoString\b/.test(text)) {
+        return "";
+      }
+      return "";
     }
     if (ts.isArrowFunction(node) || ts.isFunctionExpression(node)) {
       return "";
     }
-    if (
-      ts.isTemplateExpression(node) ||
-      ts.isBinaryExpression(node) ||
-      ts.isParenthesizedExpression(node)
-    ) {
-      return "[dynamic]";
+    if (ts.isTaggedTemplateExpression(node)) {
+      return "";
     }
-    // Fallback to a short indication
-    return "[dynamic]";
+    if (ts.isArrayLiteralExpression(node)) {
+      return "";
+    }
+    if (ts.isObjectLiteralExpression(node)) {
+      return "";
+    }
+    if (ts.isAwaitExpression(node)) {
+      return "";
+    }
+    if (ts.isAsExpression(node) || ts.isTypeAssertionExpression(node)) {
+      return stringifyExpression(node.expression);
+    }
+    if (ts.isNonNullExpression(node)) {
+      return stringifyExpression(node.expression);
+    }
+    // For anything else, don't leak raw code — return empty
+    return "";
   }
 
   /** Components that accept a `label` prop for accessible naming */

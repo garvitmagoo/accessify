@@ -17,6 +17,10 @@
 
 ### Fixed
 
+- **Screen Reader preview accuracy** — the simulator no longer reads Tailwind/CSS utility classes or raw JSX/expression source as content; complex expressions (ternaries, logical ops, template literals, calls) now resolve to clean text or are omitted.
+- **AI fixes no longer fabricate accessible names** — prompts now require a `TODO: describe …` placeholder when a label (`aria-label`, `alt`, link/button text) can't be derived from the source, instead of inventing text.
+- **AI fixes no longer convert meaningful elements** — a clickable `<img>`/`<input>`/`<a>` etc. is fixed in place with `role`/`tabIndex`/`onKeyDown` rather than being changed into a `<button>` or wrapped in a new element. Generic `<div>`/`<span>` promotion is still allowed.
+- **Accessify panels open consistently in the second editor column** — the Report, Settings, Screen Reader, AI Diff, and Bulk Fix panels all open in column two; files opened from the report stay in column one.
 - **Extension host freeze during AI fixes** — fixed an infinite loop in the JSX attribute parser (`findAttributeLocation`) that could hang the extension host when processing certain multi-line elements.
 
 ## [1.1.0] - 2026-04-22

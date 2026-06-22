@@ -27,7 +27,7 @@ Action types:
 
 Multiple actions can be combined (e.g. add role + tabIndex + onKeyDown).
 
-FALLBACK: If the fix cannot be expressed as actions (e.g. restructuring, wrapping, adding siblings), return:
+FALLBACK: If the fix genuinely cannot be expressed as actions, return:
 {
   "fixedCode": "<complete replacement code>",
   "explanation": "...",
@@ -43,9 +43,12 @@ Rules:
 - Do NOT add className, class, or style attributes. Do NOT fabricate event handlers. Only add attributes that directly fix the accessibility issue (aria-*, role, alt, lang, htmlFor, scope, tabIndex, etc.).
 - Preserve ALL existing attributes exactly as-is. Only add/modify/remove what is needed for the a11y fix.
 - IMPORTANT: The code is JSX/React. Use JSX attribute names: className, htmlFor, tabIndex, onClick, onKeyDown.
+- Do NOT wrap the element in a new parent element, and do NOT add sibling elements. Fix the existing element in place.
+- You MAY promote a generic non-semantic element (<div> or <span>) to a semantic interactive element (e.g. <div onClick> → <button>) when that is the cleanest fix. But do NOT convert a meaningful element that renders its own content — <img>, <input>, <video>, <audio>, <a>, <textarea>, <select>, <svg>, etc. — into a different tag. For a click handler on such an element, add role="button" + tabIndex={0} + an onKeyDown handler to that SAME element instead. (Correcting an invalid/typo ARIA role value is always allowed.)
 - If returning fixedCode: preserve the exact indentation, line breaks, and formatting. Do NOT add children or closing tags not in the original snippet.
 - For page-title issues: infer a descriptive, meaningful title from the file path, component name, or page content — never use generic text like "Page Title" or "Untitled".
-- For color-contrast issues: adjust the color value to meet WCAG AA contrast ratio ≥ 4.5:1 while staying as close to the original hue as possible. Prefer darkening for light backgrounds and lightening for dark backgrounds.`;
+- For color-contrast issues: adjust the color value to meet WCAG AA contrast ratio ≥ 4.5:1 while staying as close to the original hue as possible. Prefer darkening for light backgrounds and lightening for dark backgrounds.
+- NEVER fabricate or guess an accessible name (aria-label, alt, title, link/button text). Only use a real value if it is clearly derivable from the SAME snippet — e.g. an icon component name like <CloseIcon /> → "Close", visible text already present, or an existing prop. If you cannot derive it from the given code, use the literal placeholder "TODO: describe …" (e.g. aria-label="TODO: describe action") so the developer knows to fill it in. Do not invent specific words like "Close view name" that do not appear in the source.`;
 
 let _secrets: vscode.SecretStorage | undefined;
 

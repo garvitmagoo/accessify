@@ -22,6 +22,34 @@ export class A11yReportPanel {
       this.disposables,
     );
     this.panel.onDidDispose(() => this.dispose(), null, this.disposables);
+
+    // Keep text editors out of the report's column. When the report lives in
+    // column Two (or beyond) and a file opens there — e.g. from the Explorer or
+    // Quick Open while the report group is focused — move it to the first group
+    // so files always land beside the report, never on top of it.
+    vscode.window.onDidChangeActiveTextEditor(
+      (editor) => this.relocateEditorOutOfReportColumn(editor),
+      null,
+      this.disposables,
+    );
+  }
+
+  /**
+   * If a text editor becomes active in the same editor group as the report
+   * panel, move it to the first group so the report keeps its column to itself.
+   */
+  private async relocateEditorOutOfReportColumn(
+    editor: vscode.TextEditor | undefined,
+  ): Promise<void> {
+    if (!editor) { return; }
+    const reportColumn = this.panel.viewColumn;
+    // Nothing to do if the report is hidden or already sits in the first column.
+    if (reportColumn === undefined || reportColumn === vscode.ViewColumn.One) {
+      return;
+    }
+    if (editor.viewColumn === reportColumn) {
+      await vscode.commands.executeCommand('workbench.action.moveEditorToFirstGroup');
+    }
   }
 
   private async handleMessage(msg: any): Promise<void> {

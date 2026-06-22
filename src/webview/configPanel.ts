@@ -91,7 +91,7 @@ export class ConfigPanel {
   }
 
   public static createOrShow(): void {
-    const column = vscode.ViewColumn.One;
+    const column = vscode.ViewColumn.Two;
     if (ConfigPanel.currentPanel) {
       ConfigPanel.currentPanel.panel.reveal(column);
       ConfigPanel.currentPanel.sendCurrentConfig();
