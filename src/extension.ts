@@ -5,7 +5,7 @@ import { A11yReportPanel } from './webview/reportPanel';
 import { ScreenReaderPanel } from './webview/screenReaderPanel';
 import { createStatusBarItem, updateStatusBarScore } from './statusBar';
 import { generateA11yTests } from './testGenerator';
-import { exportSarif, exportJson } from './exportReport';
+import { exportJson } from './exportReport';
 import { initAiProvider, setAiApiKey, clearAiFixCache, getStoredApiKey } from './ai/provider';
 import { getFullFileFix, showFixLog, clearFullFixCache } from './ai/fullFileFix';
 import { DiffPreviewPanel } from './webview/diffPreviewPanel';
@@ -248,16 +248,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
   context.subscriptions.push(
     vscode.commands.registerCommand('a11y.exportReport', async () => {
-      const format = await vscode.window.showQuickPick(
-        [
-          { label: 'SARIF', description: 'Static Analysis Results Interchange Format — for GitHub Code Scanning, Azure DevOps, SonarQube' },
-          { label: 'JSON', description: 'Lightweight JSON — for custom CI integrations and dashboards' },
-        ],
-        { placeHolder: 'Select export format', title: 'Accessify: Export Report' },
-      );
-      if (!format) { return; }
-      if (format.label === 'SARIF') { await exportSarif(); }
-      else { await exportJson(); }
+      await exportJson();
     }),
   );
 

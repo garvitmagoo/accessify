@@ -313,6 +313,7 @@ export class ConfigPanel {
       <div class="desc">Select the AI provider for generating fix suggestions.</div>
       <select id="aiProvider" data-key="aiProvider">
         <option value="none">None (AI disabled)</option>
+        <option value="copilot">GitHub Copilot</option>
         <option value="openai">OpenAI</option>
         <option value="azure-openai">Azure OpenAI</option>
         <option value="claude">Anthropic Claude</option>
@@ -402,6 +403,7 @@ export class ConfigPanel {
     const vscode = acquireVsCodeApi();
 
     const MODEL_HINTS = {
+      copilot: 'Optional — model family e.g. gpt-4o, claude-sonnet (uses your Copilot subscription)',
       openai: 'e.g. gpt-4, gpt-4o, gpt-4o-mini',
       'azure-openai': 'Use your Azure deployment name',
       claude: 'e.g. claude-sonnet-4-20250514, claude-opus-4-20250514',
@@ -429,9 +431,10 @@ export class ConfigPanel {
     function updateVisibility() {
       const provider = elements.aiProvider.value;
       const isAi = provider !== 'none';
+      const needsKey = isAi && provider !== 'copilot';
       elements.endpointField.classList.toggle('visible', provider === 'azure-openai');
       elements.modelField.classList.toggle('visible', isAi);
-      elements.apiKeyField.classList.toggle('visible', isAi);
+      elements.apiKeyField.classList.toggle('visible', needsKey);
       elements.modelHint.textContent = MODEL_HINTS[provider] || '';
     }
 

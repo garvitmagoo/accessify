@@ -1,8 +1,4 @@
 <p align="center">
-  <img src="icon.png" alt="Accessify — catch WCAG 2.1 AA violations in React, JSX, TSX, and HTML as you type" width="200"/>
-</p>
-
-<p align="center">
   <a href="https://marketplace.visualstudio.com/items?itemName=garvit-magoo.accessify"><img src="https://img.shields.io/visual-studio-marketplace/v/garvit-magoo.accessify?label=VS%20Marketplace&color=0078D4" alt="Marketplace version"/></a>
   <a href="https://marketplace.visualstudio.com/items?itemName=garvit-magoo.accessify"><img src="https://img.shields.io/visual-studio-marketplace/i/garvit-magoo.accessify?color=0078D4" alt="Installs"/></a>
   <a href="https://marketplace.visualstudio.com/items?itemName=garvit-magoo.accessify"><img src="https://img.shields.io/visual-studio-marketplace/r/garvit-magoo.accessify?color=0078D4" alt="Rating"/></a>
@@ -11,28 +7,6 @@
 </p>
 
 Accessify is a real-time accessibility linter for the editor. It scans React, JSX, TSX, and HTML against **26 WCAG 2.1 Level A & AA rules** as you type, offers one-click fixes (deterministic and AI-powered), and includes a screen reader preview so you can hear your UI the way assistive-technology users do.
-
----
-
-## See it in action
-
-**Catch issues the moment you type them.**
-
-<p align="center">
-  <img src="icon.png" alt="Demo: scanning in editor" width="200"/>
-</p>
-
-**Fix them with one keystroke.** Press `⌘.` (or `Ctrl+.`) to open Quick Fix.
-
-<p align="center">
-  <img src="icon.png" alt="Demo: autofix" width="200"/>
-</p>
-
-**Hear what a screen reader will say.** Open `Accessify: Screen Reader Preview` for the active file.
-
-<p align="center">
-  <img src="icon.png" alt="Demo: screen reader preview" width="200"/>
-</p>
 
 ---
 
@@ -45,7 +19,7 @@ Most a11y tools catch issues at runtime, in the browser, after deployment. Acces
 - **Fix with confidence.** Static and AI fixes both show a confidence score and risk level before you apply them.
 - **Hear your UI.** The screen reader simulator announces elements out loud using the Web Speech API — voice, rate, and per-row playback.
 - **Zero config.** Works out of the box. AI features are opt-in.
-- **CI-ready.** Export SARIF for GitHub Code Scanning.
+- **CI-ready.** Export a JSON report for custom CI integrations and dashboards.
 
 ---
 
@@ -77,7 +51,7 @@ All commands are prefixed with `Accessify:` in the Command Palette (`⌘⇧P`):
 - `Static Fix Current File` · `Static Fix Workspace`
 - `AI Fix Entire File` · `Bulk AI Fix Workspace`
 - `Generate A11y Unit Tests`
-- `Export Report` (SARIF or JSON)
+- `Export Report` (JSON)
 - `Set AI API Key`
 - `Open Settings`
 
@@ -122,7 +96,27 @@ You can disable any rule, override severity, or scope rules by glob in `.a11yrc.
 
 ## AI fixes (optional)
 
-Accessify supports OpenAI, Azure OpenAI, and Anthropic Claude for context-aware fixes. AI is **off** by default; to enable:
+Accessify supports **GitHub Copilot**, OpenAI, Azure OpenAI, and Anthropic Claude for context-aware fixes. AI is **off** by default.
+
+### GitHub Copilot (no API key)
+
+The easiest option if you already have GitHub Copilot. It uses the VS Code Language Model API and your existing Copilot subscription — no API key needed.
+
+1. Run `Accessify: Open Settings` and select **GitHub Copilot** as the provider.
+2. Use `Accessify: AI Fix Entire File` for a single file or `Bulk AI Fix Workspace` for everything.
+
+```json
+// settings.json
+{
+  "a11y.aiProvider": "copilot",
+  // optional — pick a model family, otherwise the first available Copilot model is used
+  "a11y.aiModel": "gpt-4o"
+}
+```
+
+> Requires VS Code 1.93+ with GitHub Copilot installed and signed in. The first request will prompt you to grant Accessify access to language models.
+
+### Bring your own key (OpenAI / Azure / Claude)
 
 1. Run `Accessify: Set AI API Key` and paste your key (stored in VS Code secret storage).
 2. Run `Accessify: Open Settings` and pick a provider.
@@ -165,23 +159,28 @@ Drop a `.a11yrc.json` at your project root to customize rules and exclusions:
 }
 ```
 
-Disabled rules and excluded files are respected by diagnostics, the report panel, SARIF/JSON exports, and bulk fixes.
+Disabled rules and excluded files are respected by diagnostics, the report panel, JSON exports, and bulk fixes.
 
 ---
 
 ## CI / CD
 
-Generate a SARIF report and feed it into GitHub Code Scanning:
+Export a JSON accessibility report for custom CI integrations, dashboards, or
+quality gates:
 
 ```bash
 code --command a11y.exportReport
 ```
 
+This writes `a11y-report.json` to the workspace root, which you can upload as a
+build artifact or parse in a custom step:
+
 ```yaml
 # .github/workflows/a11y.yml
-- uses: github/codeql-action/upload-sarif@v3
+- uses: actions/upload-artifact@v4
   with:
-    sarif_file: a11y-report.sarif
+    name: a11y-report
+    path: a11y-report.json
 ```
 
 ---

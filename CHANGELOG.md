@@ -1,5 +1,27 @@
 # Changelog
 
+## [1.2.1] - 2026-07-15
+
+### Changed
+
+- **Export Report is now JSON-only** — the `Accessify: Export Report` command exports a JSON report directly without the SARIF/JSON format picker. The `a11y-report.json` output suits custom CI integrations and dashboards.
+- **Smarter `Generate A11y Unit Tests`** — targeted tests are now generated for accessibility-relevant elements that are *present* in the source (images, buttons, form controls, headings, links, ARIA widgets, etc.), not just where issues were detected. A currently-clean file still gets focused regression tests. The generated file now imports `@testing-library/jest-dom`, adapts imports for Jest vs Vitest, and includes a short usage header.
+
+### Added
+
+- **Test setup check** — before generating tests, Accessify checks the nearest `package.json` for the required testing packages (`@testing-library/react`, `@testing-library/user-event`, `@testing-library/jest-dom`, `jest-axe`) and a test runner. If anything is missing it shows a non-blocking warning with a **Copy Install Command** action.
+
+### Fixed
+
+- **`Generate A11y Unit Tests` no longer creates doubled filenames** — re-running the command on an already-generated test file (e.g. `Foo.a11y.test.tsx`) no longer produces `Foo.a11y.test.a11y.test.tsx`. It resolves back to the source component and updates the existing test file in place.
+- **Marketplace README image** — removed the relative hero image that failed to render on the VS Code Marketplace (relative image paths in HTML `<img>` tags are not resolved there).
+
+## [1.2.0] - 2026-06-23
+
+### Added
+
+- **GitHub Copilot AI provider** — a new `copilot` option for `a11y.aiProvider` that generates accessibility fixes through the VS Code Language Model API using your existing GitHub Copilot subscription. No API key required. Optionally set `a11y.aiModel` to a model family (e.g. `gpt-4o`, `claude-sonnet`) to pick a specific Copilot model. Requires VS Code 1.93+ with GitHub Copilot installed and signed in.
+
 ## [1.1.1] - 2026-06-22
 
 ### Added

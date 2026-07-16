@@ -151,22 +151,26 @@ export async function getAiFix(code: string, issue: A11yIssue, surroundingContex
     return cached;
   }
 
-  let apiKey: string | undefined;
-  if (_secrets) {
-    apiKey = await _secrets.get('a11y.aiApiKey');
-  }
   const model = resolveModelDefault(config.get<string>('aiModel', ''), provider);
 
-  if (!apiKey) {
-    const legacyKey = config.get<string>('aiApiKey', '');
-    if (legacyKey) {
-      vscode.window.showWarningMessage(
-        'Accessify: API key found in plaintext settings. Run "Accessify: Set AI API Key" to store it securely, then remove a11y.aiApiKey from settings.',
-      );
-    } else {
-      vscode.window.showWarningMessage('Accessify: AI API key not configured. Run "Accessify: Set AI API Key" to set it up.');
+  let apiKey: string | undefined;
+  if (provider !== 'copilot') {
+    if (_secrets) {
+      apiKey = await _secrets.get('a11y.aiApiKey');
     }
-    return null;
+
+    if (!apiKey) {
+      const legacyKey = config.get<string>('aiApiKey', '');
+      if (legacyKey) {
+        vscode.window.showWarningMessage(
+          'Accessify: API key found in plaintext settings. Run "Accessify: Set AI API Key" to store it securely, then remove a11y.aiApiKey from settings.',
+        );
+        apiKey = legacyKey;
+      } else {
+        vscode.window.showWarningMessage('Accessify: AI API key not configured. Run "Accessify: Set AI API Key" to set it up.');
+        return null;
+      }
+    }
   }
 
   const userMessage = `Accessibility Issue: ${issue.message}
@@ -191,7 +195,7 @@ Return JSON with "actions" array (preferred) or "fixedCode" string.`;
     const response = await callAiProvider(provider, {
       systemPrompt: SYSTEM_PROMPT,
       userMessage,
-      apiKey,
+      apiKey: apiKey ?? '',
       model,
       endpoint,
       signal,

@@ -1,7 +1,25 @@
 import * as vscode from 'vscode';
+import * as path from 'path';
 import { scanForA11yIssues } from './scanner/astScanner';
 import type { A11yIssue } from './types';
 import { resolveActiveDocument } from './editorUtils';
+
+type TestFramework = 'jest' | 'vitest' | 'unknown';
+
+interface TestSetup {
+  /** Required testing packages that are not declared in the nearest package.json. */
+  missing: string[];
+  /** Detected test runner. */
+  framework: TestFramework;
+}
+
+/** Packages the generated tests import and rely on. */
+const REQUIRED_TEST_DEPS = [
+  '@testing-library/react',
+  '@testing-library/user-event',
+  '@testing-library/jest-dom',
+  'jest-axe',
+];
 
 /**
  * Generates @testing-library/react accessibility tests for the current file.
@@ -27,13 +45,23 @@ export async function generateA11yTests(): Promise<void> {
   const sourceText = doc.getText();
   const issues = scanForA11yIssues(sourceText, doc.fileName);
 
+  // Lightweight dependency/setup check — warn (non-blocking) if the project
+  // is missing packages the generated tests need, or has no test runner.
+  const setup = await detectTestSetup(doc.uri);
+  warnIfSetupIncomplete(setup);
+
   const componentName = inferComponentName(sourceText, doc.fileName);
-  const testCode = buildTestFile(componentName, issues, doc.fileName);
+  const testCode = buildTestFile(componentName, issues, sourceText, doc.fileName, setup.framework);
 
   // Determine output path: same directory, *.a11y.test.tsx
   const originalPath = doc.uri.fsPath;
   const ext = originalPath.endsWith('.tsx') ? '.tsx' : '.jsx';
-  const baseName = originalPath.replace(/\.(tsx|jsx)$/, '');
+  // Strip the extension and any pre-existing `.a11y.test` segment so re-running
+  // on an already-generated test file updates it in place instead of producing
+  // `foo.a11y.test.a11y.test.tsx`.
+  const baseName = originalPath
+    .replace(/\.(tsx|jsx)$/, '')
+    .replace(/\.a11y\.test$/i, '');
   const testPath = `${baseName}.a11y.test${ext}`;
 
   const testUri = vscode.Uri.file(testPath);
@@ -101,6 +129,77 @@ export async function generateA11yTests(): Promise<void> {
 
 /* ── Helpers ────────────────────────────────────────────────────────────── */
 
+/**
+ * Walks up from the file's directory (bounded by its workspace folder) to the
+ * nearest package.json and reports which required test packages are missing and
+ * which test runner (Jest/Vitest) is configured.
+ */
+async function detectTestSetup(fileUri: vscode.Uri): Promise<TestSetup> {
+  const rootPath = vscode.workspace.getWorkspaceFolder(fileUri)?.uri.fsPath;
+  let dir = path.dirname(fileUri.fsPath);
+
+  // Bound the walk to avoid runaway loops on unusual paths.
+  for (let depth = 0; depth < 50; depth++) {
+    const pkgUri = vscode.Uri.file(path.join(dir, 'package.json'));
+    try {
+      const bytes = await vscode.workspace.fs.readFile(pkgUri);
+      const pkg = JSON.parse(new TextDecoder().decode(bytes)) as {
+        dependencies?: Record<string, string>;
+        devDependencies?: Record<string, string>;
+      };
+      const deps = { ...(pkg.dependencies ?? {}), ...(pkg.devDependencies ?? {}) };
+      const missing = REQUIRED_TEST_DEPS.filter(name => !(name in deps));
+
+      let framework: TestFramework = 'unknown';
+      if ('vitest' in deps) {
+        framework = 'vitest';
+      } else if ('jest' in deps || '@jest/globals' in deps || 'ts-jest' in deps) {
+        framework = 'jest';
+      }
+      return { missing, framework };
+    } catch {
+      // No readable package.json here — keep walking up.
+    }
+
+    if (rootPath && dir === rootPath) { break; }
+    const parent = path.dirname(dir);
+    if (parent === dir) { break; }
+    dir = parent;
+  }
+
+  // No package.json found — treat everything as missing.
+  return { missing: [...REQUIRED_TEST_DEPS], framework: 'unknown' };
+}
+
+/**
+ * Shows a non-blocking warning when the project can't run the generated tests,
+ * offering to copy the install command to the clipboard.
+ */
+function warnIfSetupIncomplete(setup: TestSetup): void {
+  const needsRunner = setup.framework === 'unknown';
+  if (setup.missing.length === 0 && !needsRunner) { return; }
+
+  const parts: string[] = [];
+  if (setup.missing.length > 0) { parts.push(`missing ${setup.missing.join(', ')}`); }
+  if (needsRunner) { parts.push('no Jest or Vitest runner detected'); }
+
+  const pkgs = [...setup.missing];
+  if (needsRunner) { pkgs.push('jest', 'jest-environment-jsdom', '@types/jest'); }
+  const installCmd = `npm install --save-dev ${pkgs.join(' ')}`;
+
+  void vscode.window
+    .showWarningMessage(
+      `Accessify: Test setup incomplete (${parts.join('; ')}). Generated tests won't run until dependencies are installed.`,
+      'Copy Install Command',
+    )
+    .then(action => {
+      if (action === 'Copy Install Command') {
+        void vscode.env.clipboard.writeText(installCmd);
+        void vscode.window.showInformationMessage('Accessify: Install command copied to clipboard.');
+      }
+    });
+}
+
 function inferComponentName(source: string, filePath: string): string {
   // Try to find `export default function Foo` or `export default class Foo` or `function Foo`
   const fnMatch = source.match(/export\s+(?:default\s+)?function\s+(\w+)/);
@@ -129,14 +228,89 @@ function inferComponentName(source: string, filePath: string): string {
   return base.replace(/\.(tsx|jsx)$/, '').replace(/[^a-zA-Z0-9]/g, '');
 }
 
+/**
+ * Inspects the component source and returns the set of rules whose target
+ * elements/attributes are present. This lets the generator emit focused
+ * regression tests for elements that exist even when they currently pass
+ * (e.g. images that already have alt text).
+ *
+ * Note: some rules (e.g. color-contrast, nextjs-head-lang) can't be reliably
+ * inferred from source, so they remain issue-driven and are unioned in by the
+ * caller.
+ */
+function detectApplicableRules(source: string): Set<string> {
+  const rules = new Set<string>();
+
+  // Images
+  if (/<img[\s/>]/i.test(source) || /role\s*=\s*['"]img['"]/i.test(source)) {
+    rules.add('img-alt');
+  }
+  // Buttons
+  if (/<button[\s/>]/i.test(source) || /role\s*=\s*['"]button['"]/i.test(source)) {
+    rules.add('button-label');
+  }
+  // Form controls
+  if (/<input\b/i.test(source) || /<select[\s/>]/i.test(source) || /<textarea[\s/>]/i.test(source)) {
+    rules.add('form-label');
+  }
+  // Headings
+  if (/<h[1-6][\s/>]/i.test(source)) {
+    rules.add('heading-order');
+  }
+  // Click handlers → keyboard support + focusability
+  if (/\bonClick\s*=/.test(source)) {
+    rules.add('click-events-have-key-events');
+    rules.add('interactive-supports-focus');
+  }
+  // Any explicit ARIA role
+  if (/\brole\s*=\s*['"]/.test(source)) {
+    rules.add('aria-role');
+  }
+  // ARIA widget patterns (dialog / tabs)
+  if (/role\s*=\s*['"](dialog|tab|tablist|tabpanel)['"]/i.test(source)) {
+    rules.add('aria-pattern');
+  }
+  // Hover-only handlers
+  if (/\bonMouse(Over|Enter)\s*=/.test(source)) {
+    rules.add('no-mouse-only-hover');
+  }
+  // Personal-data inputs → autocomplete
+  if (/<input\b[^>]*type\s*=\s*['"](email|tel|password)['"]/i.test(source)) {
+    rules.add('autocomplete-valid');
+  }
+  // autoFocus usage
+  if (/\bauto[fF]ocus\b/.test(source)) {
+    rules.add('no-autofocus');
+  }
+  // Links (anchor or Next.js Link)
+  if (/<a[\s/>]/i.test(source) || /<Link[\s/>]/.test(source)) {
+    rules.add('nextjs-link-text');
+  }
+
+  return rules;
+}
+
 function buildTestFile(
   componentName: string,
   issues: A11yIssue[],
+  source: string,
   filePath: string,
+  framework: TestFramework,
 ): string {
   const relImport = `./${filePath.replace(/\\/g, '/').split('/').pop()?.replace(/\.(tsx|jsx)$/, '')}`;
 
   const lines: string[] = [];
+  lines.push(`/**`);
+  lines.push(` * Accessibility tests for <${componentName} />, generated by Accessify.`);
+  lines.push(` * If ${componentName} requires props to render, pass them in each`);
+  lines.push(` * render(<${componentName} ... />) call below.`);
+  lines.push(` * Requires @testing-library/react, @testing-library/jest-dom and jest-axe`);
+  lines.push(` * running under Jest or Vitest with a jsdom environment.`);
+  lines.push(` */`);
+  if (framework === 'vitest') {
+    lines.push(`import { describe, it, expect } from 'vitest';`);
+  }
+  lines.push(`import '@testing-library/jest-dom';`);
   lines.push(`import { render, screen, within } from '@testing-library/react';`);
   lines.push(`import userEvent from '@testing-library/user-event';`);
   lines.push(`import { axe, toHaveNoViolations } from 'jest-axe';`);
@@ -158,20 +332,20 @@ function buildTestFile(
   lines.push(`  });`);
   lines.push('');
 
-  // Group issues by rule for consolidated tests
-  const byRule = new Map<string, A11yIssue[]>();
-  for (const issue of issues) {
-    const arr = byRule.get(issue.rule) || [];
-    arr.push(issue);
-    byRule.set(issue.rule, arr);
-  }
+  // Determine which targeted tests to generate. We combine rules with detected
+  // issues AND rules whose target elements/attributes are present in the source,
+  // so a currently-clean file still gets focused regression tests (e.g. an
+  // `img-alt` test when images exist, even if they already have alt text).
+  const applicableRules = new Set<string>([
+    ...detectApplicableRules(source),
+    ...issues.map(issue => issue.rule),
+  ]);
 
   // ── img-alt ──
-  const imgIssues = [...(byRule.get('img-alt') || [])];
-  if (imgIssues.length > 0) {
+  if (applicableRules.has('img-alt')) {
     lines.push(`  it('images should have accessible alt text', () => {`);
     lines.push(`    render(<${componentName} />);`);
-    lines.push(`    const images = screen.getAllByRole('img');`);
+    lines.push(`    const images = screen.queryAllByRole('img');`);
     lines.push(`    images.forEach((img) => {`);
     lines.push(`      expect(img).toHaveAttribute('alt');`);
     lines.push(`      expect(img.getAttribute('alt')).not.toBe('');`);
@@ -181,10 +355,10 @@ function buildTestFile(
   }
 
   // ── button-label ──
-  if (byRule.has('button-label')) {
+  if (applicableRules.has('button-label')) {
     lines.push(`  it('buttons should have accessible names', () => {`);
     lines.push(`    render(<${componentName} />);`);
-    lines.push(`    const buttons = screen.getAllByRole('button');`);
+    lines.push(`    const buttons = screen.queryAllByRole('button');`);
     lines.push(`    buttons.forEach((button) => {`);
     lines.push(`      expect(button).toHaveAccessibleName();`);
     lines.push(`    });`);
@@ -193,7 +367,7 @@ function buildTestFile(
   }
 
   // ── form-label ──
-  if (byRule.has('form-label')) {
+  if (applicableRules.has('form-label')) {
     lines.push(`  it('form controls should have accessible labels', () => {`);
     lines.push(`    render(<${componentName} />);`);
     lines.push(`    const textboxes = screen.queryAllByRole('textbox');`);
@@ -213,7 +387,7 @@ function buildTestFile(
   }
 
   // ── heading-order ──
-  if (byRule.has('heading-order')) {
+  if (applicableRules.has('heading-order')) {
     lines.push(`  it('headings should follow a logical hierarchy', () => {`);
     lines.push(`    const { container } = render(<${componentName} />);`);
     lines.push(`    const headings = container.querySelectorAll('h1, h2, h3, h4, h5, h6');`);
@@ -230,11 +404,11 @@ function buildTestFile(
   }
 
   // ── click-events-have-key-events ──
-  if (byRule.has('click-events-have-key-events')) {
+  if (applicableRules.has('click-events-have-key-events')) {
     lines.push(`  it('clickable elements should be keyboard-accessible', async () => {`);
     lines.push(`    const user = userEvent.setup();`);
     lines.push(`    render(<${componentName} />);`);
-    lines.push(`    const buttons = screen.getAllByRole('button');`);
+    lines.push(`    const buttons = screen.queryAllByRole('button');`);
     lines.push(`    for (const el of buttons) {`);
     lines.push(`      el.focus();`);
     lines.push(`      expect(el).toHaveFocus();`);
@@ -245,7 +419,7 @@ function buildTestFile(
   }
 
   // ── aria-role ──
-  if (byRule.has('aria-role')) {
+  if (applicableRules.has('aria-role')) {
     lines.push(`  it('should only use valid ARIA roles', () => {`);
     lines.push(`    const { container } = render(<${componentName} />);`);
     lines.push(`    const withRole = container.querySelectorAll('[role]');`);
@@ -273,7 +447,7 @@ function buildTestFile(
   }
 
   // ── aria-pattern ──
-  if (byRule.has('aria-pattern')) {
+  if (applicableRules.has('aria-pattern')) {
     lines.push(`  it('ARIA widgets should follow WAI-ARIA patterns', () => {`);
     lines.push(`    render(<${componentName} />);`);
     lines.push(`    const dialogs = screen.queryAllByRole('dialog');`);
@@ -296,7 +470,7 @@ function buildTestFile(
   }
 
   // ── no-mouse-only-hover ──
-  if (byRule.has('no-mouse-only-hover')) {
+  if (applicableRules.has('no-mouse-only-hover')) {
     lines.push(`  it('hover content should also be keyboard-accessible', async () => {`);
     lines.push(`    const user = userEvent.setup();`);
     lines.push(`    render(<${componentName} />);`);
@@ -312,7 +486,7 @@ function buildTestFile(
   }
 
   // ── autocomplete-valid ──
-  if (byRule.has('autocomplete-valid')) {
+  if (applicableRules.has('autocomplete-valid')) {
     lines.push(`  it('personal data inputs should have valid autocomplete attributes', () => {`);
     lines.push(`    const { container } = render(<${componentName} />);`);
     lines.push(`    const personalInputTypes = ['email', 'tel', 'password'];`);
@@ -327,7 +501,7 @@ function buildTestFile(
   }
 
   // ── nextjs-head-lang ──
-  if (byRule.has('nextjs-head-lang')) {
+  if (applicableRules.has('nextjs-head-lang')) {
     lines.push(`  it('HTML document should have a lang attribute', () => {`);
     lines.push(`    render(<${componentName} />);`);
     lines.push(`    expect(document.documentElement).toHaveAttribute('lang');`);
@@ -337,10 +511,10 @@ function buildTestFile(
   }
 
   // ── nextjs-link-text ──
-  if (byRule.has('nextjs-link-text')) {
+  if (applicableRules.has('nextjs-link-text')) {
     lines.push(`  it('links should have discernible text', () => {`);
     lines.push(`    render(<${componentName} />);`);
-    lines.push(`    const links = screen.getAllByRole('link');`);
+    lines.push(`    const links = screen.queryAllByRole('link');`);
     lines.push(`    links.forEach((link) => {`);
     lines.push(`      expect(link).toHaveAccessibleName();`);
     lines.push(`    });`);
@@ -349,7 +523,7 @@ function buildTestFile(
   }
 
   // ── color-contrast ──
-  if (byRule.has('color-contrast')) {
+  if (applicableRules.has('color-contrast')) {
     lines.push(`  it('should meet WCAG AA color contrast requirements', async () => {`);
     lines.push(`    const { container } = render(<${componentName} />);`);
     lines.push(`    const results = await axe(container, { runOnly: ['color-contrast'] });`);
@@ -359,7 +533,7 @@ function buildTestFile(
   }
 
   // ── no-autofocus ──
-  if (byRule.has('no-autofocus')) {
+  if (applicableRules.has('no-autofocus')) {
     lines.push(`  it('should not use autoFocus attribute', () => {`);
     lines.push(`    const { container } = render(<${componentName} />);`);
     lines.push(`    const autoFocused = container.querySelectorAll('[autofocus]');`);
@@ -369,7 +543,7 @@ function buildTestFile(
   }
 
   // ── interactive-supports-focus ──
-  if (byRule.has('interactive-supports-focus')) {
+  if (applicableRules.has('interactive-supports-focus')) {
     lines.push(`  it('interactive elements should be focusable', () => {`);
     lines.push(`    const { container } = render(<${componentName} />);`);
     lines.push(`    const interactive = container.querySelectorAll('[onclick], [onmousedown]');`);

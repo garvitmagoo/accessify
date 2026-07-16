@@ -3,6 +3,8 @@
  * and the full-file fix pipeline.
  */
 
+import * as vscode from 'vscode';
+
 export const AI_TIMEOUT_MS = 120_000;
 const MAX_RETRIES = 2;
 const INITIAL_BACKOFF_MS = 1_000;
@@ -166,6 +168,7 @@ const DEFAULT_MODELS: Record<string, string> = {
   openai: 'gpt-4o',
   'azure-openai': 'gpt-4o',
   claude: 'claude-sonnet-4-20250514',
+  copilot: '',
 };
 
 /**
@@ -306,6 +309,68 @@ export async function callClaude(opts: AiCallOptions): Promise<string> {
 }
 
 /**
+ * Call the VS Code Language Model API (GitHub Copilot).
+ * No API key needed — uses the user's existing Copilot subscription.
+ */
+export async function callCopilot(opts: Omit<AiCallOptions, 'apiKey'>): Promise<string> {
+  if (typeof vscode.lm?.selectChatModels !== 'function') {
+    throw new Error(
+      'VS Code Language Model API is not available. Ensure you are running VS Code 1.93+ with GitHub Copilot installed and signed in.',
+    );
+  }
+
+  const selector: vscode.LanguageModelChatSelector = {};
+  if (opts.model) {
+    // Allow user to specify a family like 'gpt-4o' or 'claude-sonnet'
+    selector.family = opts.model;
+  }
+
+  const models = await vscode.lm.selectChatModels(selector);
+  if (!models || models.length === 0) {
+    throw new Error(
+      opts.model
+        ? `No Copilot model found matching "${opts.model}". Ensure GitHub Copilot is installed, you are signed in, and the model family is available.`
+        : 'No Copilot models available. Ensure GitHub Copilot is installed and you are signed in.',
+    );
+  }
+
+  const model = models[0];
+  aiLog(`callCopilot: using model "${model.name}" (family: ${model.family}, vendor: ${model.vendor})`);
+
+  const messages: vscode.LanguageModelChatMessage[] = [
+    vscode.LanguageModelChatMessage.User(`${opts.systemPrompt}\n\n${opts.userMessage}`),
+  ];
+
+  const requestOptions: vscode.LanguageModelChatRequestOptions = {
+    justification: 'Accessify accessibility fix',
+  };
+
+  let cancellationToken: vscode.CancellationToken | undefined;
+  if (opts.signal) {
+    const cts = new vscode.CancellationTokenSource();
+    opts.signal.addEventListener('abort', () => cts.cancel(), { once: true });
+    cancellationToken = cts.token;
+  }
+
+  const response = await model.sendRequest(
+    messages,
+    requestOptions,
+    cancellationToken,
+  );
+
+  // Collect the streamed response
+  let result = '';
+  for await (const chunk of response.text) {
+    result += chunk;
+  }
+
+  aiLog(`callCopilot: response collected (${result.length} chars)`);
+
+  // Strip markdown fences if the model wrapped the JSON
+  return result.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '');
+}
+
+/**
  * Route an AI call to the correct provider.
  */
 export async function callAiProvider(
@@ -315,7 +380,9 @@ export async function callAiProvider(
   aiLog(`callAiProvider: provider=${provider}`);
   let result: string;
   try {
-    if (provider === 'azure-openai') {
+    if (provider === 'copilot') {
+      result = await callCopilot(opts);
+    } else if (provider === 'azure-openai') {
       result = await callAzureOpenAI({ ...opts, endpoint: opts.endpoint ?? '' });
     } else if (provider === 'claude') {
       result = await callClaude(opts);

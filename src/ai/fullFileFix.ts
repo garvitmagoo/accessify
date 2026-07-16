@@ -221,8 +221,13 @@ export async function getFullFileFix(document: vscode.TextDocument, options?: Fu
 
   const designSystem = await detectDesignSystem();
 
-  const apiKey = await getApiKey(config);
-  if (!apiKey) { return null; }
+  let apiKey: string | null;
+  if (provider === 'copilot') {
+    apiKey = '';
+  } else {
+    apiKey = await getApiKey(config);
+    if (!apiKey) { return null; }
+  }
   const model = resolveModelDefault(config.get<string>('aiModel', ''), provider);
 
   const changes = await fetchAndValidateChanges(

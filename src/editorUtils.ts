@@ -18,13 +18,15 @@ export async function resolveActiveDocument(
 ): Promise<vscode.TextDocument | undefined> {
   // 1. Active editor
   const active = vscode.window.activeTextEditor?.document;
-  if (active && languageIds.has(active.languageId)) {
+  if (active && languageIds.has(active.languageId) &&
+      !(excludePattern && excludePattern.test(active.uri.fsPath))) {
     return active;
   }
 
   // 2. Visible editors
   const visible = vscode.window.visibleTextEditors.find(
-    e => languageIds.has(e.document.languageId),
+    e => languageIds.has(e.document.languageId) &&
+         !(excludePattern && excludePattern.test(e.document.uri.fsPath)),
   );
   if (visible) { return visible.document; }
 

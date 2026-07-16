@@ -1,8 +1,8 @@
 {
   "name": "accessify",
   "displayName": "Accessify",
-  "description": "Catch WCAG 2.1 AA violations in React/JSX/TSX/HTML as you type. 26 rules with auto-fixes, AI-powered fixes (OpenAI, Azure, Claude), and screen reader preview.",
-  "version": "1.1.1",
+  "description": "Catch WCAG 2.1 AA violations in React/JSX/TSX/HTML as you type. 26 rules with auto-fixes, AI-powered fixes (Copilot, OpenAI, Azure, Claude), and screen reader preview.",
+  "version": "1.2.1",
   "publisher": "garvit-magoo",
   "license": "MIT",
   "icon": "icon.png",
@@ -32,7 +32,7 @@
     "theme": "dark"
   },
   "engines": {
-    "vscode": "^1.85.0"
+    "vscode": "^1.93.0"
   },
   "categories": [
     "Linters",
@@ -109,12 +109,14 @@
         "a11y.aiProvider": {
           "type": "string",
           "enum": [
+            "copilot",
             "azure-openai",
             "openai",
             "claude",
             "none"
           ],
           "enumDescriptions": [
+            "GitHub Copilot (uses your existing Copilot subscription via VS Code Language Model API — no API key needed)",
             "Azure OpenAI Service (requires endpoint configuration)",
             "OpenAI API (GPT-4, GPT-4o, etc.)",
             "Anthropic Claude API (Claude Sonnet, Opus, etc.)",
@@ -192,7 +194,7 @@
     "@types/glob": "^8.1.0",
     "@types/mocha": "^10.0.6",
     "@types/node": "^20.11.0",
-    "@types/vscode": "^1.85.0",
+    "@types/vscode": "^1.93.0",
     "@typescript-eslint/eslint-plugin": "^7.0.0",
     "@typescript-eslint/parser": "^7.0.0",
     "@vscode/test-electron": "^2.3.8",
